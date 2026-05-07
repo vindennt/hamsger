@@ -35,6 +35,7 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+lib/**/*.js
 
 app-example
 scripts/
