@@ -1,19 +1,24 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   initAlice,
   initBob,
   kdfMsgChain,
   ratchetDecrypt,
+  ratchetEncrypt,
   RatchetState,
 } from "../../lib/crypto/ratchet";
 import { KeyPair, X3DH } from "../../lib/crypto/x3dh";
-import { EncryptedDbMessage, Message, toMessage, User } from "./types";
+import { EncryptedDbMessage, toMessage, User } from "./types";
 
 export function useDecryption(
   currentUser: User,
   mockLog: { _meta: any; messages: EncryptedDbMessage[] },
-): Message[] {
-  return useMemo(() => {
+) {
+  const encryptorRef = useRef<{
+    encrypt: (text: string) => ReturnType<typeof ratchetEncrypt>;
+  } | null>(null);
+
+  const decryptedMessages = useMemo(() => {
     try {
       const keys = mockLog._meta.keys;
       let state: RatchetState;
@@ -59,7 +64,21 @@ export function useDecryption(
               iv: dbMsg.iv,
               authTag: dbMsg.auth_tag,
             };
+
+            // TODO: remove this hardcoded debug feature
+            const isNew = !dbMsg.id.startsWith("msg_00");
+            if (isNew) {
+              console.log(
+                `[${currentUser}] Received raw blob from server:`,
+                ratchetMsg,
+              );
+            }
+
             plaintext = ratchetDecrypt(state, ratchetMsg, noop);
+
+            if (isNew) {
+              console.log(`[${currentUser}] Decrypted plaintext:`, plaintext);
+            }
           }
         } catch (e) {
           console.error(`Failed to decrypt message ${dbMsg.id}`, e);
@@ -75,10 +94,19 @@ export function useDecryption(
         };
       });
 
+      encryptorRef.current = {
+        encrypt: (text: string) => ratchetEncrypt(state, text, () => {}),
+      };
+
       return decrypted;
     } catch (e) {
       console.warn("[useDecryption] Failed to initialize decryption state:", e);
       return mockLog.messages.map(toMessage);
     }
-  }, [currentUser, mockLog]);
+  }, [currentUser, mockLog.messages]);
+
+  return {
+    decryptedMessages,
+    encryptMessage: (text: string) => encryptorRef.current?.encrypt(text),
+  };
 }
