@@ -1,11 +1,34 @@
 import { useState } from "react";
-import { INITIAL_MESSAGES, Message, User } from "./types";
+import {
+  EncryptedDbMessage,
+  FALLBACK_MESSAGES,
+  Message,
+  User,
+  toMessage,
+} from "./types";
+
+// Load the encrypted mock chat log
+// TODO: remove this test case and implement zero knowledge database reading
+const mockLog = require("../../scripts/combined/mock_messages.json") as {
+  _meta: Record<string, unknown>;
+  messages: EncryptedDbMessage[];
+};
+
+const MOCK_MESSAGES: Message[] = (() => {
+  try {
+    return mockLog.messages.map(toMessage);
+  } catch (e) {
+    console.warn("[useChatState] Failed to load mock_messages.json:", e);
+    return FALLBACK_MESSAGES;
+  }
+})();
 
 // For now this will use local state.
 export const useChatState = () => {
   // Debug state for testing diff users
   const [currentUser, setCurrentUser] = useState<User>("Alice");
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  // TODO: implement decryption
+  const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
   const [inputText, setInputText] = useState("");
 
   const sendMessage = () => {
