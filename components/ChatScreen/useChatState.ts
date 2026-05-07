@@ -1,35 +1,27 @@
 import { useState } from "react";
-import {
-  EncryptedDbMessage,
-  FALLBACK_MESSAGES,
-  Message,
-  User,
-  toMessage,
-} from "./types";
+import { EncryptedDbMessage, Message, User } from "./types";
+import { useDecryption } from "./useDecryption";
 
 // Load the encrypted mock chat log
-// TODO: remove this test case and implement zero knowledge database reading
 const mockLog = require("../../scripts/combined/mock_messages.json") as {
-  _meta: Record<string, unknown>;
+  _meta: any;
   messages: EncryptedDbMessage[];
 };
-
-const MOCK_MESSAGES: Message[] = (() => {
-  try {
-    return mockLog.messages.map(toMessage);
-  } catch (e) {
-    console.warn("[useChatState] Failed to load mock_messages.json:", e);
-    return FALLBACK_MESSAGES;
-  }
-})();
 
 // For now this will use local state.
 export const useChatState = () => {
   // Debug state for testing diff users
   const [currentUser, setCurrentUser] = useState<User>("Alice");
-  // TODO: implement decryption
-  const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
+
+  // Feed the encrypted DB messages through the Double Ratchet engine
+  const decryptedMessages = useDecryption(currentUser, mockLog);
+
+  // Track newly sent messages in the current session
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+
   const [inputText, setInputText] = useState("");
+
+  const messages = [...decryptedMessages, ...localMessages];
 
   const sendMessage = () => {
     if (!inputText.trim()) return;
@@ -45,13 +37,14 @@ export const useChatState = () => {
       `[Message Sent] Sender: ${currentUser}, Text: ${newMessage.text}`,
     );
 
-    setMessages((prev) => [...prev, newMessage]);
+    setLocalMessages((prev) => [...prev, newMessage]);
     setInputText("");
   };
 
-  // TODO: remove this and implement logging in
   const switchUser = (user: User) => {
     setCurrentUser(user);
+    // TODO: send messags in encrypted state so we dont have to clear the new messages.
+    setLocalMessages([]);
   };
 
   return {

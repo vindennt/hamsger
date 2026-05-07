@@ -1,0 +1,6 @@
+{
+  "kdf_salt": "0000000000000000000000000000000000000000000000000000000000000000",
+  "root_kdf_info": "DoubleRatchet_RootChain",
+  "msg_kdf_info": "DoubleRatchet_MessageChain",
+  "max_skip": 10
+}
