@@ -1,11 +1,10 @@
-// TODO: remove hardcoded types and use public ids
-// TODO: Dynamically loaded "friends" list
-export type User = "Alice" | "Bob" | "Stanley";
+// Dynamically loaded contacts
+export type User = string;
 
 export interface UserIdentity {
-  name: User;
-  uuid: string; // unique device/user identifier
-  publicKey: string; // identity public key (from KeyPair)
+  name: string; // username
+  uuid: string;
+  publicKey: string; // identity PK
 }
 
 export type ConversationId = string;
