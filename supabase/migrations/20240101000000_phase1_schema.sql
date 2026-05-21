@@ -7,10 +7,8 @@
 -- PROFILES
 CREATE TABLE public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    username TEXT NOT NULL CHECK (char_length(username) >= 3),
-    discriminator TEXT NOT NULL CHECK (char_length(discriminator) = 4),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    UNIQUE(username, discriminator)
+    username TEXT NOT NULL UNIQUE CHECK (char_length(username) >= 3 AND username = LOWER(username)),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- PREKEY BUNDLES (X3DH Public Keys)

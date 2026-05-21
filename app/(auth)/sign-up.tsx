@@ -20,13 +20,14 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-
   async function handleSignUp() {
     if (!username || !email || !password) {
       Alert.alert("Error", "Please fill in missing fields");
       return;
     }
-    if (username.length < 3) {
+
+    const cleanUsername = username.toLowerCase().trim();
+    if (cleanUsername.length < 3) {
       Alert.alert("Error", "Username must be at least 3 characters");
       return;
     }
@@ -35,7 +36,15 @@ export default function SignUpScreen() {
     const {
       data: { user },
       error: authError,
-    } = await supabase.auth.signUp({ email, password });
+    } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username: cleanUsername,
+        },
+      },
+    });
 
     if (authError) {
       Alert.alert("Error", authError.message);
@@ -44,15 +53,14 @@ export default function SignUpScreen() {
     }
 
     if (user) {
-      const discriminator = Math.floor(1000 + Math.random() * 9000).toString();
       const { error: profileError } = await supabase
         .from("profiles")
-        .insert({ id: user.id, username, discriminator });
+        .insert({ id: user.id, username: cleanUsername });
 
       if (profileError) {
         Alert.alert("Error", profileError.message);
       } else {
-        // TODO: Implement email verificaiton. For now, disable it for testing purposes.
+        // TODO: Implement email verification. For now, disable it for testing purposes.
         // Alert.alert("Check your email", "We sent you a confirmation link.");
         router.replace("/sign-in");
       }
