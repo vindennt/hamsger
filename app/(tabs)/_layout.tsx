@@ -15,7 +15,6 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarStyle: { display: "none" }, // Hides tab bar
       }}
     >
       <Tabs.Screen
@@ -28,11 +27,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="friends"
         options={{
-          title: "xplore",
+          title: "Friends",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+            <IconSymbol size={28} name="person.2.fill" color={color} />
           ),
         }}
       />
