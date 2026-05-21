@@ -8,13 +8,15 @@ export const useChatState = () => {
     isReady,
     identities,
     currentUser,
-    switchUser,
+    currentUserId,
+    contacts,
     currentPeer,
     setCurrentPeer,
     activeConversationId,
     activeSession,
     activeMessages,
     addMessage,
+    handleAddContact,
   } = useSessionManager();
 
   const [inputText, setInputText] = useState("");
@@ -37,14 +39,7 @@ export const useChatState = () => {
     try {
       ratchetMsg = encryptMessage(inputText.trim());
     } catch (e: any) {
-      // TODO: remove this mock via hidden initial X3DH
-      if (e.message.includes("no sending chain key")) {
-        alert(
-          "Mock Signal Protocol Constraint:\n\nSomeone needs to message Stanley first to initiate initial X3DH handshake",
-        );
-      } else {
-        console.error(e);
-      }
+      console.error("Encryption Ratchet Error:", e);
       return;
     }
 
@@ -77,12 +72,14 @@ export const useChatState = () => {
     isReady,
     identities,
     currentUser,
-    switchUser,
+    currentUserId,
+    contacts,
     currentPeer,
     setCurrentPeer,
     messages: decryptedMessages,
     inputText,
     setInputText,
     sendMessage,
+    handleAddContact,
   };
 };
