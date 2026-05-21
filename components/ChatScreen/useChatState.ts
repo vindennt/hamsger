@@ -1,37 +1,58 @@
 import { useState } from "react";
-import { EncryptedDbMessage, User } from "./types";
+import { EncryptedDbMessage } from "./types";
 import { useDecryption } from "./useDecryption";
+import { useSessionManager } from "./useSessionManager";
 
-// Load the encrypted mock chat log
-const mockLog = require("../../scripts/combined/mock_messages.json") as {
-  _meta: any;
-  messages: EncryptedDbMessage[];
-};
-
-// For now this will use local state.
 export const useChatState = () => {
-  const [currentUser, setCurrentUser] = useState<User>("Alice");
-  const [dbMessages, setDbMessages] = useState<EncryptedDbMessage[]>(
-    mockLog.messages,
-  );
+  const {
+    isReady,
+    identities,
+    currentUser,
+    switchUser,
+    currentPeer,
+    setCurrentPeer,
+    activeConversationId,
+    activeSession,
+    activeMessages,
+    addMessage,
+  } = useSessionManager();
+
   const [inputText, setInputText] = useState("");
 
-  const { decryptedMessages, encryptMessage } = useDecryption(currentUser, {
-    _meta: mockLog._meta,
-    messages: dbMessages,
-  });
+  const { decryptedMessages, encryptMessage } = useDecryption(
+    identities[currentUser],
+    activeSession,
+    activeMessages,
+  );
 
   const sendMessage = () => {
     if (!inputText.trim()) return;
 
-    const ratchetMsg = encryptMessage(inputText.trim());
-    if (!ratchetMsg) {
+    if (!encryptMessage || !activeConversationId) {
       console.error("Encryption failed or not ready");
       return;
     }
 
+    let ratchetMsg;
+    try {
+      ratchetMsg = encryptMessage(inputText.trim());
+    } catch (e: any) {
+      // TODO: remove this mock via hidden initial X3DH
+      if (e.message.includes("no sending chain key")) {
+        alert(
+          "Mock Signal Protocol Constraint:\n\nSomeone needs to message Stanley first to initiate initial X3DH handshake",
+        );
+      } else {
+        console.error(e);
+      }
+      return;
+    }
+
+    if (!ratchetMsg) return;
+
     const newDbMsg: EncryptedDbMessage = {
-      id: `msg_new_${Date.now()}`,
+      id: `msg_new_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      conversation_id: activeConversationId,
       sender: currentUser,
       ciphertext: ratchetMsg.ciphertext,
       iv: ratchetMsg.iv,
@@ -40,30 +61,28 @@ export const useChatState = () => {
       pn: ratchetMsg.header.PN,
       n: ratchetMsg.header.N,
       timestamp: new Date().toISOString(),
-      // empty fields for now
-      conversation_id: "",
-      text: "",
+      text: "", // placeholder
     };
 
     console.log(
-      `[Server DB] Received encrypted blob from ${currentUser}:`,
+      `[Server DB] Received encrypted blob from ${currentUser} for conv ${activeConversationId}:`,
       newDbMsg,
     );
 
-    setDbMessages((prev) => [...prev, newDbMsg]);
+    addMessage(activeConversationId, newDbMsg);
     setInputText("");
   };
 
-  const switchUser = (user: User) => {
-    setCurrentUser(user);
-  };
-
   return {
+    isReady,
+    identities,
     currentUser,
+    switchUser,
+    currentPeer,
+    setCurrentPeer,
     messages: decryptedMessages,
     inputText,
     setInputText,
     sendMessage,
-    switchUser,
   };
 };

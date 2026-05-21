@@ -1,4 +1,21 @@
-export type User = "Alice" | "Bob";
+// TODO: remove hardcoded types and use public ids
+// TODO: Dynamically loaded "friends" list
+export type User = "Alice" | "Bob" | "Stanley";
+
+export interface UserIdentity {
+  name: User;
+  uuid: string; // unique device/user identifier
+  publicKey: string; // identity public key (from KeyPair)
+}
+
+export type ConversationId = string;
+
+export function makeConversationId(
+  uuid1: string,
+  uuid2: string,
+): ConversationId {
+  return [uuid1, uuid2].sort().join(":");
+}
 
 export interface Message {
   id: string;
@@ -12,7 +29,7 @@ export interface Message {
 
 export interface EncryptedDbMessage {
   id: string;
-  conversation_id: string;
+  conversation_id: ConversationId;
   sender: User;
   timestamp: string; // ISO-8601
 

@@ -7,16 +7,21 @@ import {
   View,
 } from "react-native";
 import { styles } from "./styles";
+import { User } from "./types";
 import { useChatState } from "./useChatState";
 
 export default function ChatScreen() {
   const {
+    isReady,
+    identities,
     currentUser,
+    switchUser,
+    currentPeer,
+    setCurrentPeer,
     messages,
     inputText,
     setInputText,
     sendMessage,
-    switchUser,
   } = useChatState();
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -31,43 +36,69 @@ export default function ChatScreen() {
     }
   };
 
+  if (!isReady) return null;
+
+  const users: User[] = ["Alice", "Bob", "Stanley"];
+  const peers = users.filter((u) => u !== currentUser);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Encrypted Chat (Web)</Text>
-        <View style={styles.switcher}>
-          <TouchableOpacity
-            style={[
-              styles.switchBtn,
-              currentUser === "Alice" && styles.activeBtn,
-            ]}
-            onPress={() => switchUser("Alice")}
-          >
-            <Text
-              style={[
-                styles.switchText,
-                currentUser === "Alice" && styles.activeText,
-              ]}
+        <Text style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+          ID: {identities[currentUser].uuid.substring(0, 8)}
+        </Text>
+
+        <View style={[styles.switcher, { marginTop: 12 }]}>
+          {users.map((u) => (
+            <TouchableOpacity
+              key={u}
+              style={[styles.switchBtn, currentUser === u && styles.activeBtn]}
+              onPress={() => switchUser(u)}
             >
-              Alice
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.switchBtn,
-              currentUser === "Bob" && styles.activeBtn,
-            ]}
-            onPress={() => switchUser("Bob")}
-          >
-            <Text
+              <Text
+                style={[
+                  styles.switchText,
+                  currentUser === u && styles.activeText,
+                ]}
+              >
+                {u}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View
+          style={{
+            flexDirection: "row",
+            marginTop: 10,
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ marginRight: 10, alignSelf: "center", color: "#666" }}>
+            Chat with:
+          </Text>
+          {peers.map((p) => (
+            <TouchableOpacity
+              key={p}
               style={[
-                styles.switchText,
-                currentUser === "Bob" && styles.activeText,
+                styles.switchBtn,
+                { paddingVertical: 4, paddingHorizontal: 12, marginRight: 6 },
+                currentPeer === p && styles.activeBtn,
               ]}
+              onPress={() => setCurrentPeer(p)}
             >
-              Bob
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  styles.switchText,
+                  { fontSize: 12 },
+                  currentPeer === p && styles.activeText,
+                ]}
+              >
+                {p}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
 
