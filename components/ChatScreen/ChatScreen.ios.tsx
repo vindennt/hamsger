@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "../../lib/supabase";
 import { styles } from "./styles";
 import { useChatState } from "./useChatState";
 
@@ -20,6 +21,7 @@ export default function ChatScreen() {
     setInputText,
     sendMessage,
     switchUser,
+    identities,
   } = useChatState();
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -35,7 +37,20 @@ export default function ChatScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Encrypted Chat (iOS)</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+            <View>
+              <Text style={styles.headerTitle}>Encrypted Chat (iOS)</Text>
+              <Text style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                ID: {identities[currentUser].uuid.substring(0, 8)}
+              </Text>
+            </View>
+            <TouchableOpacity 
+              style={{ backgroundColor: '#ff3b30', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}
+              onPress={() => supabase.auth.signOut()}
+            >
+              <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.switcher}>
             <TouchableOpacity
               style={[
