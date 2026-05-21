@@ -9,13 +9,39 @@ import {
   UserIdentity,
 } from "./types";
 
-// TODO: Remove mock log loading and load actual chat logs.
-
-// We import the mock log just for Alice<->Bob initial history
-const mockLog = require("../../scripts/combined/mock_messages.json") as {
-  _meta: any;
+// TODO: Replace with real Supabase message loading.
+// allow app to load without this hardcoded test blob
+type MockLog = {
+  _meta: {
+    keys: {
+      SK: string;
+      aliceDHsCore: string;
+      bobRatchetPub: string;
+      bobRatchetPriv: string;
+    };
+  };
   messages: EncryptedDbMessage[];
 };
+
+cot
+  _meta: {
+    keys: {
+      SK: "fallback_SK",
+      aliceDHsCore: "fallback_core",
+      bobRatchetPub: "pub_fallback",
+      bobRatchetPriv: "priv_fallback",
+    },
+  },
+  messages: [],
+};
+
+let mockLog: MockLog;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  mockLog = require("../../scripts/combined/mock_messages.json") as MockLog;
+} catch {
+  mockLog = MOCK_LOG_FALLBACK;
+}
 
 export interface SessionContext {
   initiator: UserIdentity;
