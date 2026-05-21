@@ -8,8 +8,12 @@ import {
   RatchetState,
 } from "../../lib/crypto/ratchet";
 import { KeyPair, X3DH } from "../../lib/crypto/x3dh";
-import { EncryptedDbMessage, toMessage, UserIdentity } from "./types";
-import { SessionContext } from "./useSessionManager";
+import {
+  EncryptedDbMessage,
+  SessionContext,
+  toMessage,
+  UserIdentity,
+} from "./types";
 
 export function useDecryption(
   currentUserIdentity: UserIdentity | undefined,
