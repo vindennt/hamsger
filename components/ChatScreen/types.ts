@@ -62,3 +62,14 @@ export function toMessage(db: EncryptedDbMessage): Message {
 
 // Placeholder used only when the mock log fails to load.
 export const FALLBACK_MESSAGES: Message[] = [];
+
+export interface SessionContext {
+  initiator: UserIdentity;
+  responder: UserIdentity;
+  SK: string;
+  meta: {
+    initiatorDHsCore: string;
+    responderRatchetPub: string;
+    responderRatchetPriv: string;
+  };
+}
