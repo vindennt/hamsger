@@ -1,7 +1,7 @@
 import { useAuth } from "@/context/auth";
 import { useEffect, useState } from "react";
 import { verifyUserKeysExist } from "../../lib/crypto";
-import { addContact } from "../../lib/contacts";
+import { sendFriendRequest } from "../../lib/contacts";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import {
   ConversationId,
@@ -113,7 +113,7 @@ export function useSessionManager() {
   ): Promise<{ success: boolean; message: string }> => {
     if (!user) return { success: false, message: "User not logged in" };
 
-    const res = await addContact(currentUserId, currentUser, friendUsername);
+    const res = await sendFriendRequest(currentUserId, currentUser, friendUsername);
     if (res.success) {
       // Trigger state refresh
       setIsReady(false);
