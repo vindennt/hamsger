@@ -20,7 +20,7 @@ export default function Root({ children }: PropsWithChildren) {
         */}
         <meta
           httpEquiv="Content-Security-Policy"
-          content="default-src 'self'; script-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none';"
+          content="default-src 'self'; script-src 'self' 'unsafe-eval'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data:;"
         />
         <ScrollViewStyleReset />
 
