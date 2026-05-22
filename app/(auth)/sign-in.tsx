@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { fieldStyles, styles } from "./auth.styles";
+import { fieldStyles, styles } from "../../components/styles/auth.styles";
 
 export default function SignInScreen() {
   const [email, setEmail] = useState("");

@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { fieldStyles, styles } from "./auth.styles";
+import { fieldStyles, styles } from "../../components/styles/auth.styles";
 
 export default function SignUpScreen() {
   const [username, setUsername] = useState("");
@@ -33,6 +33,19 @@ export default function SignUpScreen() {
     }
 
     setLoading(true);
+
+    const { data: existingUser, error: checkError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("username", cleanUsername)
+      .maybeSingle();
+
+    if (existingUser) {
+      Alert.alert("Error", "Username is already taken");
+      setLoading(false);
+      return;
+    }
+
     const {
       data: { user },
       error: authError,
@@ -59,11 +72,10 @@ export default function SignUpScreen() {
 
       if (profileError) {
         Alert.alert("Error", profileError.message);
-      } else {
-        // TODO: Implement email verification. For now, disable it for testing purposes.
-        // Alert.alert("Check your email", "We sent you a confirmation link.");
-        router.replace("/sign-in");
+        setLoading(false);
+        return;
       }
+      router.replace("/(tabs)");
     }
     setLoading(false);
   }
@@ -158,4 +170,3 @@ function Field(props: {
     </View>
   );
 }
-
