@@ -3,7 +3,7 @@ import { supabase } from "../../lib/supabase";
 import { makeConversationId, SessionContext, UserIdentity } from "./types";
 
 /**
- * Loads the contact list from Supabase, fetches their public keys, and initializes
+ * Loads the contact list from database, fetches their public keys, and initializes
  * local E2EE session contexts for each contact.
  * Session init is handled elsewhere
  */
@@ -15,20 +15,21 @@ export async function loadContactsAndSessions(
   newIdentities: Record<string, UserIdentity>;
   initialSessions: Record<string, SessionContext>;
 }> {
-  const { data: contactsData, error: contactsError } = await supabase
-    .from("contacts")
+  const { data: requestsData, error: requestsError } = await supabase
+    .from("friend_requests")
     .select(
       `
-      contact_user_id,
-      profiles:contact_user_id (
-        username
-      )
+      from_user_id,
+      to_user_id,
+      from_profile:from_user_id ( username ),
+      to_profile:to_user_id ( username )
     `,
     )
-    .eq("user_id", userId);
+    .eq("status", "accepted")
+    .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`);
 
-  if (contactsError) {
-    console.error("Error fetching contacts:", contactsError);
+  if (requestsError) {
+    console.error("Error fetching contacts:", requestsError);
   }
 
   const resolvedContacts: UserIdentity[] = [];
@@ -37,11 +38,12 @@ export async function loadContactsAndSessions(
   };
   const initialSessions: Record<string, SessionContext> = {};
 
-  if (contactsData) {
-    for (const item of contactsData) {
-      const friendId = item.contact_user_id;
-      const profile = item.profiles as any;
-      const friendName = profile?.username || "friend";
+  if (requestsData) {
+    for (const item of requestsData) {
+      const isFromMe = item.from_user_id === userId;
+      const friendId = isFromMe ? item.to_user_id : item.from_user_id;
+      const profile = isFromMe ? item.to_profile : item.from_profile;
+      const friendName = (profile as any)?.username || "friend";
 
       // Get contact's public prekey bundle
       const { data: friendBundle } = await supabase

@@ -1,7 +1,12 @@
 import { useAuth } from "@/context/auth";
 import { useEffect, useState } from "react";
+import {
+  acceptFriendRequest,
+  fetchPendingRequests,
+  rejectFriendRequest,
+  sendFriendRequest,
+} from "../../lib/contacts";
 import { verifyUserKeysExist } from "../../lib/crypto";
-import { sendFriendRequest } from "../../lib/contacts";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import {
   ConversationId,
@@ -38,6 +43,7 @@ export function useSessionManager() {
   const [messagesDB, setMessagesDB] = useState<
     Record<ConversationId, EncryptedDbMessage[]>
   >({});
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
   useEffect(() => {
     setCurrentUser(currentUsername);
@@ -89,8 +95,15 @@ export function useSessionManager() {
     setupUserCryptoAndContacts();
   }, [user, refreshTrigger]);
 
+  useEffect(() => {
+    if (!user) return;
+    fetchPendingRequests(user.id).then((data) => {
+      setPendingRequests(data || []);
+    });
+  }, [user, refreshTrigger]);
+
   const activeConversationId =
-    isReady && currentPeer && identities[currentPeer]
+    isReady && currentPeer && identities[currentUser] && identities[currentPeer]
       ? makeConversationId(
           identities[currentUser].uuid,
           identities[currentPeer].uuid,
@@ -113,9 +126,33 @@ export function useSessionManager() {
   ): Promise<{ success: boolean; message: string }> => {
     if (!user) return { success: false, message: "User not logged in" };
 
-    const res = await sendFriendRequest(currentUserId, currentUser, friendUsername);
+    const res = await sendFriendRequest(
+      currentUserId,
+      currentUser,
+      friendUsername,
+    );
     if (res.success) {
       // Trigger state refresh
+      setIsReady(false);
+      setRefreshTrigger((prev) => prev + 1);
+    }
+    return res;
+  };
+
+  const handleAcceptRequest = async (requestId: string, fromUserId: string) => {
+    if (!user) return { success: false, message: "User not logged in" };
+    const res = await acceptFriendRequest(requestId, user.id, fromUserId);
+    if (res.success) {
+      setIsReady(false);
+      setRefreshTrigger((prev) => prev + 1);
+    }
+    return res;
+  };
+
+  const handleRejectRequest = async (requestId: string) => {
+    if (!user) return { success: false, message: "User not logged in" };
+    const res = await rejectFriendRequest(requestId);
+    if (res.success) {
       setIsReady(false);
       setRefreshTrigger((prev) => prev + 1);
     }
@@ -135,5 +172,8 @@ export function useSessionManager() {
     activeMessages,
     addMessage,
     handleAddContact,
+    pendingRequests,
+    handleAcceptRequest,
+    handleRejectRequest,
   };
 }

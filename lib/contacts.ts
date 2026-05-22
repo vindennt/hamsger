@@ -29,21 +29,6 @@ export async function sendFriendRequest(
       return { success: false, message: `User "${cleanName}" not found.` };
     }
 
-    // Check if already in contacts
-    const { data: existingContact } = await supabase
-      .from("contacts")
-      .select("id")
-      .eq("user_id", currentUserId)
-      .eq("contact_user_id", profile.id)
-      .maybeSingle();
-
-    if (existingContact) {
-      return {
-        success: false,
-        message: `${profile.username} is already in your contacts.`,
-      };
-    }
-
     // Check if friend request already exists
     const { data: existingRequest } = await supabase
       .from("friend_requests")
@@ -129,14 +114,6 @@ export async function acceptFriendRequest(
       .eq("id", requestId);
 
     if (updateError) throw updateError;
-
-    // 2. Insert mutual contacts
-    const { error: contactError } = await supabase.from("contacts").insert([
-      { user_id: currentUserId, contact_user_id: fromUserId },
-      { user_id: fromUserId, contact_user_id: currentUserId },
-    ]);
-
-    if (contactError) throw contactError;
 
     return { success: true, message: "Friend request accepted!" };
   } catch (err: any) {

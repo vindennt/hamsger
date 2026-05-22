@@ -17,6 +17,9 @@ export const useChatState = () => {
     activeMessages,
     addMessage,
     handleAddContact,
+    pendingRequests,
+    handleAcceptRequest,
+    handleRejectRequest,
   } = useSessionManager();
 
   const [inputText, setInputText] = useState("");
@@ -81,5 +84,8 @@ export const useChatState = () => {
     setInputText,
     sendMessage,
     handleAddContact,
+    pendingRequests,
+    handleAcceptRequest,
+    handleRejectRequest,
   };
 };
