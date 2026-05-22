@@ -1,4 +1,5 @@
 import { createSession } from "../../lib/crypto/createSession";
+import { keystore } from "../../lib/crypto/keystore";
 import { supabase } from "../../lib/supabase";
 import { makeConversationId, SessionContext, UserIdentity } from "./types";
 
@@ -64,13 +65,29 @@ export async function loadContactsAndSessions(
       resolvedContacts.push(friendIdentity);
       newIdentities[friendName] = friendIdentity;
 
+      // Sort identities to ensure both devices map initiator and responder the same
+      // TODO: is there a way to avoid this arbitrary step
+      const [initiator, responder] = [myIdentity, friendIdentity].sort((a, b) =>
+        a.uuid.localeCompare(b.uuid),
+      );
+
+      const isInitiator = initiator.uuid === userId;
+
+      const myPrivateKeyHex =
+        (await keystore.get(`ik_priv_${userId}`)) || undefined;
+
       // Initialize X3DH dynamic session locally
-      const sess = createSession(myIdentity, friendIdentity);
+      const sess = createSession(
+        initiator,
+        responder,
+        isInitiator ? myPrivateKeyHex : undefined,
+        !isInitiator ? myPrivateKeyHex : undefined,
+      );
       const convId = makeConversationId(userId, friendId);
 
       initialSessions[convId] = {
-        initiator: myIdentity,
-        responder: friendIdentity,
+        initiator: initiator,
+        responder: responder,
         SK: sess.SK,
         meta: sess.meta,
       };

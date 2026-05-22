@@ -16,6 +16,8 @@ export const useChatState = () => {
     activeSession,
     activeMessages,
     addMessage,
+    encryptOutgoingMessage,
+    sendMessageToServer,
     handleAddContact,
     pendingRequests,
     handleAcceptRequest,
@@ -24,23 +26,26 @@ export const useChatState = () => {
 
   const [inputText, setInputText] = useState("");
 
-  const { decryptedMessages, encryptMessage } = useDecryption(
+  const { decryptedMessages } = useDecryption(
     identities[currentUser],
     activeSession,
     activeMessages,
   );
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!inputText.trim()) return;
 
-    if (!encryptMessage || !activeConversationId) {
-      console.error("Encryption failed or not ready");
+    if (!activeConversationId) {
+      console.error("Encryption failed or late");
       return;
     }
 
     let ratchetMsg;
     try {
-      ratchetMsg = encryptMessage(inputText.trim());
+      ratchetMsg = await encryptOutgoingMessage(
+        activeConversationId,
+        inputText.trim(),
+      );
     } catch (e: any) {
       console.error("Encryption Ratchet Error:", e);
       return;
@@ -48,7 +53,8 @@ export const useChatState = () => {
 
     if (!ratchetMsg) return;
 
-    const newDbMsg: EncryptedDbMessage = {
+    // Encrypted DB message payload for the server
+    const serverDbMsg: EncryptedDbMessage = {
       id: `msg_new_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       conversation_id: activeConversationId,
       sender: currentUser,
@@ -59,15 +65,29 @@ export const useChatState = () => {
       pn: ratchetMsg.header.PN,
       n: ratchetMsg.header.N,
       timestamp: new Date().toISOString(),
-      text: "", // placeholder
+      text: ratchetMsg.ciphertext, // Server never sees plaintext
     };
 
+    // TODO: REmove
     console.log(
-      `[Server DB] Received encrypted blob from ${currentUser} for conv ${activeConversationId}:`,
-      newDbMsg,
+      `[Server DB] Sending encrypted blob from ${currentUser} for conv ${activeConversationId}:`,
+      serverDbMsg,
     );
 
-    addMessage(activeConversationId, newDbMsg);
+    const recipientIdentity = identities[currentPeer];
+    if (recipientIdentity) {
+      sendMessageToServer(recipientIdentity.uuid, serverDbMsg);
+    }
+
+    // Local DB message representation preserving plaintext and marked decrypted
+    const localDbMsg: EncryptedDbMessage = {
+      ...serverDbMsg,
+      text: inputText.trim(), // plaintext is kept local only
+      isDecrypted: true, // marked decrypted to prevent reprocessing on reload
+      // TODO: can we avoid hardcoded flag?
+    } as any;
+
+    addMessage(activeConversationId, localDbMsg);
     setInputText("");
   };
 

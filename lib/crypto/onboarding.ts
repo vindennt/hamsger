@@ -60,8 +60,7 @@ export async function verifyUserKeysExist(
     const ik = new KeyPair("IK_" + username);
     const spk = new KeyPair("SPK_" + username);
 
-    // Generate mock signature
-    // TODO: Implement real signing with a proper signing key
+    // Generate real Ed25519 signing key and sign the Signed Prekey (SPK)
     const sigKP = new SigningKeyPair();
     const signature = sigKP.sign(spk.publicKey);
 
@@ -70,6 +69,8 @@ export async function verifyUserKeysExist(
     await keystore.set(`ik_pub_${userId}`, ik.publicKey);
     await keystore.set(`spk_priv_${userId}`, spk.privateKey);
     await keystore.set(`spk_pub_${userId}`, spk.publicKey);
+    await keystore.set(`sig_priv_${userId}`, sigKP.privateKey);
+    await keystore.set(`sig_pub_${userId}`, sigKP.publicKey);
 
     // Upload public bundle to Supabase.
     const { error: bundleError } = await supabase.from("prekey_bundles").upsert(
@@ -119,9 +120,13 @@ export async function verifyUserKeysExist(
   } else {
     // CASE 2: Bundle exists on server. Verify we have local private keys.
     const ik_pub = await keystore.get(`ik_pub_${userId}`);
-    if (!ik_pub) {
+    // TODO: remove mock key vulnerabilities
+    const isMockKey =
+      ik_pub && (ik_pub.startsWith("pub_") || ik_pub.length !== 64);
+
+    if (!ik_pub || isMockKey) {
       console.log(
-        "[Crypto Onboarding] Key bundle exists but no local keys. Re-registering.",
+        "[Crypto Onboarding] Key bundle exists but local keys are missing or are old mock keys. Re-registering.",
       );
       const ik = new KeyPair("IK_" + username);
       const spk = new KeyPair("SPK_" + username);
@@ -132,6 +137,8 @@ export async function verifyUserKeysExist(
       await keystore.set(`ik_pub_${userId}`, ik.publicKey);
       await keystore.set(`spk_priv_${userId}`, spk.privateKey);
       await keystore.set(`spk_pub_${userId}`, spk.publicKey);
+      await keystore.set(`sig_priv_${userId}`, sigKP.privateKey);
+      await keystore.set(`sig_pub_${userId}`, sigKP.publicKey);
 
       await supabase.from("prekey_bundles").upsert(
         {
