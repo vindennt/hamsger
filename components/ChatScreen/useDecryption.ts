@@ -8,43 +8,52 @@ import {
   RatchetState,
 } from "../../lib/crypto/ratchet";
 import { KeyPair, X3DH } from "../../lib/crypto/x3dh";
-import { EncryptedDbMessage, toMessage, User } from "./types";
+import {
+  EncryptedDbMessage,
+  SessionContext,
+  toMessage,
+  UserIdentity,
+} from "./types";
 
 export function useDecryption(
-  currentUser: User,
-  mockLog: { _meta: any; messages: EncryptedDbMessage[] },
+  currentUserIdentity: UserIdentity | undefined,
+  sessionContext: SessionContext | undefined,
+  dbMessages: EncryptedDbMessage[],
 ) {
   const encryptorRef = useRef<{
     encrypt: (text: string) => ReturnType<typeof ratchetEncrypt>;
   } | null>(null);
 
   const decryptedMessages = useMemo(() => {
+    if (!sessionContext || !currentUserIdentity) return [];
     try {
-      const keys = mockLog._meta.keys;
+      const { initiator, responder, SK, meta } = sessionContext;
       let state: RatchetState;
 
       // Init user state
-      if (currentUser === "Alice") {
-        // Recreate mock Alice's exact initial state
-        const aliceDHs = new KeyPair("Alice_DHs_0", keys.aliceDHsCore);
-        state = initAlice(keys.SK, keys.bobRatchetPub, aliceDHs);
-      } else {
-        // Recreate mock Bob's exact initial state using his SPK
-        const bobRatchetKP = new KeyPair(
-          "Bob_SPK",
-          keys.bobRatchetPriv.replace("priv_", ""),
+      if (currentUserIdentity.uuid === initiator.uuid) {
+        const initiatorDHs = new KeyPair("Init_DHs_0", meta.initiatorDHsCore);
+        state = initAlice(SK, meta.responderRatchetPub, initiatorDHs);
+        state.name = currentUserIdentity.name;
+      } else if (currentUserIdentity.uuid === responder.uuid) {
+        const responderRatchetKP = new KeyPair(
+          "Resp_SPK",
+          meta.responderRatchetPriv.replace("priv_", ""),
         );
-        state = initBob(keys.SK, bobRatchetKP);
+        state = initBob(SK, responderRatchetKP);
+        state.name = currentUserIdentity.name;
+      } else {
+        throw new Error("Current user is not part of this session");
       }
 
       const noop = () => {};
 
       // Decrypt messages
-      const decrypted = mockLog.messages.map((dbMsg) => {
+      const decrypted = dbMessages.map((dbMsg) => {
         let plaintext = "";
 
         try {
-          if (dbMsg.sender === currentUser) {
+          if (dbMsg.sender === currentUserIdentity.name) {
             // Decrypt our own outgoing messages by stepping the sending chain
             if (!state.CKs) throw new Error("No sending chain key available");
             const { nextCK, messageKey } = kdfMsgChain(state.CKs);
@@ -65,11 +74,10 @@ export function useDecryption(
               authTag: dbMsg.auth_tag,
             };
 
-            // TODO: remove this hardcoded debug feature
             const isNew = !dbMsg.id.startsWith("msg_00");
             if (isNew) {
               console.log(
-                `[${currentUser}] Received raw blob from server:`,
+                `[${currentUserIdentity.name}] Received raw blob from server:`,
                 ratchetMsg,
               );
             }
@@ -77,7 +85,10 @@ export function useDecryption(
             plaintext = ratchetDecrypt(state, ratchetMsg, noop);
 
             if (isNew) {
-              console.log(`[${currentUser}] Decrypted plaintext:`, plaintext);
+              console.log(
+                `[${currentUserIdentity.name}] Decrypted plaintext:`,
+                plaintext,
+              );
             }
           }
         } catch (e) {
@@ -101,9 +112,9 @@ export function useDecryption(
       return decrypted;
     } catch (e) {
       console.warn("[useDecryption] Failed to initialize decryption state:", e);
-      return mockLog.messages.map(toMessage);
+      return dbMessages.map(toMessage);
     }
-  }, [currentUser, mockLog.messages]);
+  }, [currentUserIdentity?.uuid, sessionContext, dbMessages]);
 
   return {
     decryptedMessages,

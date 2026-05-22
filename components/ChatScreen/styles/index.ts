@@ -1,5 +1,15 @@
 import { Platform, StyleSheet } from "react-native";
 
+// Apple HIG system colors
+const systemBlue = "#007AFF";
+const systemGray6 = "#F2F2F7";
+const systemGray5 = "#E5E5EA";
+const systemGray4 = "#D1D1D6";
+const systemGray3 = "#C7C7CC";
+const systemGray = "#8E8E93";
+const label = "#000000";
+const secondaryLabel = "#3C3C43";
+
 export const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -7,59 +17,143 @@ export const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: "#f2f2f7", // iOS grouped background color
+    backgroundColor: "#ffffff",
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#ffffff",
+    paddingVertical: 10,
+    backgroundColor: "#F9F9F9",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#c6c6c8",
+    borderBottomColor: systemGray4,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#000000",
-  },
-  switcher: {
+  headerLeft: {
     flexDirection: "row",
-    backgroundColor: "#e5e5ea",
-    borderRadius: 8,
-    padding: 2,
+    alignItems: "center",
   },
-  switchBtn: {
-    paddingVertical: 6,
+  backButton: {
+    marginRight: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  backButtonText: {
+    color: systemBlue,
+    fontSize: 17,
+    fontWeight: "400",
+    letterSpacing: -0.41,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: label,
+    letterSpacing: -0.41,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: systemGray,
+    marginTop: 1,
+    letterSpacing: 0,
+  },
+  signOutBtn: {
     paddingHorizontal: 12,
-    borderRadius: 6,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
-  activeBtn: {
-    backgroundColor: "#ffffff",
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 1,
+  signOutBtnText: {
+    color: "#FF3B30",
+    fontSize: 15,
+    fontWeight: "400",
+    letterSpacing: -0.24,
   },
-  switchText: {
+  contactsList: {
+    flex: 1,
+  },
+  contactsHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: systemGray6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  contactsTitle: {
     fontSize: 13,
-    fontWeight: "500",
-    color: "#8e8e93",
+    fontWeight: "600",
+    color: systemGray,
+    textTransform: "uppercase",
+    letterSpacing: -0.08,
   },
-  activeText: {
-    color: "#000000",
+  addContactBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: systemBlue,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addContactBtnText: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "400",
+    lineHeight: 22,
+  },
+  contactItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: systemGray5,
+  },
+  contactAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: systemGray6,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  contactAvatarText: {
+    fontSize: 17,
+    fontWeight: "600",
+    color: systemBlue,
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactName: {
+    fontSize: 17,
+    fontWeight: "400",
+    color: label,
+    letterSpacing: -0.41,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+  },
+  emptyStateText: {
+    color: systemGray,
+    fontSize: 15,
+    textAlign: "center",
+    marginTop: 12,
+    letterSpacing: -0.24,
   },
   chatWrapper: {
     flex: 1,
+    backgroundColor: "#ffffff",
   },
   messageList: {
     padding: 16,
-    paddingBottom: 24,
+    paddingBottom: 8,
   },
   messageRow: {
     flexDirection: "row",
-    marginBottom: 12,
+    marginBottom: 4,
     alignItems: "flex-end",
   },
   messageRowMe: {
@@ -72,80 +166,81 @@ export const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#007aff",
+    backgroundColor: systemGray5,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 8,
+    marginRight: 6,
   },
   avatarText: {
-    color: "#ffffff",
-    fontWeight: "bold",
+    color: secondaryLabel,
+    fontWeight: "600",
     fontSize: 12,
   },
   bubble: {
     maxWidth: "75%",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 18,
   },
   bubbleMe: {
-    backgroundColor: "#007aff", // iOS Blue
+    backgroundColor: systemBlue,
     borderBottomRightRadius: 4,
   },
   bubbleOther: {
-    backgroundColor: "#e5e5ea", // iOS Gray
+    backgroundColor: systemGray6,
     borderBottomLeftRadius: 4,
   },
   messageText: {
-    fontSize: 16,
+    fontSize: 17,
     lineHeight: 22,
+    letterSpacing: -0.41,
   },
   messageTextMe: {
     color: "#ffffff",
   },
   messageTextOther: {
-    color: "#000000",
+    color: label,
   },
   timeText: {
-    fontSize: 10,
-    marginTop: 4,
+    fontSize: 11,
+    marginTop: 2,
     alignSelf: "flex-end",
   },
   timeTextMe: {
-    color: "#aed1ff",
+    color: "rgba(255,255,255,0.65)",
   },
   timeTextOther: {
-    color: "#8e8e93",
+    color: systemGray,
   },
   inputContainer: {
-    padding: 10,
-    paddingBottom: Platform.OS === "ios" ? 20 : 10,
-    backgroundColor: "#ffffff",
+    padding: 8,
+    paddingBottom: Platform.OS === "ios" ? 20 : 8,
+    backgroundColor: "#F9F9F9",
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#c6c6c8",
+    borderTopColor: systemGray4,
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
   },
   input: {
     flex: 1,
-    backgroundColor: "#f2f2f7",
-    borderWidth: 1,
-    borderColor: "#e5e5ea",
+    backgroundColor: "#ffffff",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: systemGray4,
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    fontSize: 16,
-    color: "#000000",
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 8,
+    fontSize: 17,
+    color: label,
     maxHeight: 100,
+    letterSpacing: -0.41,
   },
   sendButton: {
-    marginLeft: 10,
-    marginBottom: 2,
-    backgroundColor: "#007aff",
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    marginLeft: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: systemBlue,
     justifyContent: "center",
     alignItems: "center",
   },

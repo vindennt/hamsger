@@ -1,4 +1,20 @@
-export type User = "Alice" | "Bob";
+// Dynamically loaded contacts
+export type User = string;
+
+export interface UserIdentity {
+  name: string; // username
+  uuid: string;
+  publicKey: string; // identity PK
+}
+
+export type ConversationId = string;
+
+export function makeConversationId(
+  uuid1: string,
+  uuid2: string,
+): ConversationId {
+  return [uuid1, uuid2].sort().join(":");
+}
 
 export interface Message {
   id: string;
@@ -12,7 +28,7 @@ export interface Message {
 
 export interface EncryptedDbMessage {
   id: string;
-  conversation_id: string;
+  conversation_id: ConversationId;
   sender: User;
   timestamp: string; // ISO-8601
 
@@ -46,3 +62,14 @@ export function toMessage(db: EncryptedDbMessage): Message {
 
 // Placeholder used only when the mock log fails to load.
 export const FALLBACK_MESSAGES: Message[] = [];
+
+export interface SessionContext {
+  initiator: UserIdentity;
+  responder: UserIdentity;
+  SK: string;
+  meta: {
+    initiatorDHsCore: string;
+    responderRatchetPub: string;
+    responderRatchetPriv: string;
+  };
+}
