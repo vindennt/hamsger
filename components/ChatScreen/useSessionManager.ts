@@ -1,5 +1,4 @@
 import { useAuth } from "@/context/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useCallback, useEffect, useState } from "react";
 import {
   acceptFriendRequest,
@@ -17,7 +16,12 @@ import {
   RatchetState,
   serializeRatchetState,
 } from "../../lib/crypto/ratchet";
+import {
+  loadEncryptedState,
+  saveEncryptedState,
+} from "../../lib/crypto/secureStore";
 import { KeyPair } from "../../lib/crypto/x3dh";
+import { messageRepo } from "../../lib/database/messageRepository";
 import { supabase } from "../../lib/supabase";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import {
@@ -148,9 +152,8 @@ export function useSessionManager() {
       convId: ConversationId,
       session: SessionContext,
     ): Promise<RatchetState> => {
-      const stored = await AsyncStorage.getItem(
-        `ratchetState_v2_${currentUserId}_${convId}`,
-      );
+      const stateKey = `ratchetState_v3_${currentUserId}_${convId}`;
+      const stored = await loadEncryptedState(stateKey);
       if (stored) {
         try {
           return deserializeRatchetState(JSON.parse(stored));
@@ -191,8 +194,8 @@ export function useSessionManager() {
       }
 
       // Save the newly initialized state
-      await AsyncStorage.setItem(
-        `ratchetState_v2_${currentUserId}_${convId}`,
+      await saveEncryptedState(
+        stateKey,
         JSON.stringify(serializeRatchetState(state)),
       );
       return state;
@@ -230,10 +233,33 @@ export function useSessionManager() {
         const plaintext = await ratchetDecrypt(state, ratchetMsg, noop);
 
         // Save updated ratchet state
-        await AsyncStorage.setItem(
-          `ratchetState_v2_${currentUserId}_${convId}`,
+        await saveEncryptedState(
+          `ratchetState_v3_${currentUserId}_${convId}`,
           JSON.stringify(serializeRatchetState(state)),
         );
+
+        // Insert ciphertext into SQLite
+        try {
+          await messageRepo.insertMessage({
+            id: msg.id,
+            conversation_id: convId,
+            sender_id: msg.sender,
+            recipient_id: currentUserId,
+            ciphertext: msg.ciphertext,
+            iv: msg.iv,
+            auth_tag: msg.auth_tag,
+            dh_pub: msg.dh_pub,
+            pn: msg.pn,
+            n: msg.n,
+            created_at_server: msg.timestamp,
+            timestamp: new Date().toISOString(),
+          });
+        } catch (dbErr) {
+          console.error(
+            "[SessionManager] Failed to insert decrypted message to DB:",
+            dbErr,
+          );
+        }
 
         const decryptedMsg = {
           ...msg,
@@ -242,14 +268,29 @@ export function useSessionManager() {
         };
 
         addMessage(convId, decryptedMsg);
-      } catch (e) {
+      } catch (e: any) {
         console.error(
           `[SessionManager] Decryption failed for message ${msg.id}:`,
           e,
         );
+
+        try {
+          await messageRepo.logError(
+            "decryption",
+            convId,
+            msg.id,
+            e instanceof Error ? e.message : String(e),
+          );
+        } catch (dbErr) {
+          console.error(
+            "[SessionManager] Failed to log decryption error to DB:",
+            dbErr,
+          );
+        }
+
         const failedMsg = {
           ...msg,
-          text: "[Decryption Failed]",
+          text: "[Message failed to load]",
           isDecrypted: true,
         };
         addMessage(convId, failedMsg);
@@ -272,8 +313,8 @@ export function useSessionManager() {
         const ratchetMsg = await ratchetEncrypt(state, plaintext, () => {});
 
         // Save updated ratchet state
-        await AsyncStorage.setItem(
-          `ratchetState_v2_${currentUserId}_${convId}`,
+        await saveEncryptedState(
+          `ratchetState_v3_${currentUserId}_${convId}`,
           JSON.stringify(serializeRatchetState(state)),
         );
         return ratchetMsg;
@@ -305,9 +346,41 @@ export function useSessionManager() {
   };
 
   useEffect(() => {
-    if (!user || !isReady) return;
+    if (!user || !isReady || !activeConversationId) return;
 
-    // 1. Fetch initial messages
+    const loadLocalMessages = async () => {
+      try {
+        const rows = await messageRepo.getRecentMessages(
+          activeConversationId,
+          30,
+          0,
+        );
+        // Map rows to UI messages
+        for (const row of rows.reverse()) {
+          const uiMsg: EncryptedDbMessage = {
+            id: row.id,
+            conversation_id: row.conversation_id,
+            sender: row.sender_id,
+            ciphertext: row.ciphertext,
+            iv: row.iv,
+            auth_tag: row.auth_tag,
+            dh_pub: row.dh_pub,
+            pn: row.pn,
+            n: row.n,
+            timestamp: row.created_at_server,
+            text: "[Historical Message - Ciphertext Only]",
+            isDecrypted: true, // TODO: decrpyt older messages
+          } as any;
+          addMessage(row.conversation_id, uiMsg);
+        }
+      } catch (err) {
+        console.error("[SessionManager] Failed to load local messages:", err);
+      }
+    };
+
+    loadLocalMessages();
+
+    // 1. Fetch initial messages from Server (Queue)
     const fetchInitialMessages = async () => {
       try {
         const { data, error } = await supabase
@@ -318,12 +391,16 @@ export function useSessionManager() {
 
         if (error) throw error;
 
-        if (data) {
+        if (data && data.length > 0) {
           // Decrypt sequentially in order to maintain ratchet state-machine sync
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
             await decryptAndAddMessage(payload.conversation_id, payload);
           }
+
+          // prevent reprocessing: delete messages from server's queue
+          const idsToDelete = data.map((row) => row.id);
+          await supabase.from("message_queue").delete().in("id", idsToDelete);
         }
       } catch (err) {
         console.error("Error fetching initial messages:", err);
@@ -333,7 +410,6 @@ export function useSessionManager() {
     fetchInitialMessages();
 
     // 2. Subscribe to new messages
-    // TODO: THis doesnt refresh on its own when new msgs are sent though. Fix that so that its livem essage and not reload message
     const subscription = supabase
       .channel("message_queue_channel")
       .on(
@@ -349,6 +425,9 @@ export function useSessionManager() {
           if (newRow && newRow.payload) {
             const newMsg = newRow.payload as EncryptedDbMessage;
             await decryptAndAddMessage(newMsg.conversation_id, newMsg);
+
+            // Delete from queue after processing
+            await supabase.from("message_queue").delete().eq("id", newRow.id);
           }
         },
       )
@@ -357,7 +436,7 @@ export function useSessionManager() {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, decryptAndAddMessage]);
+  }, [user, isReady, activeConversationId, decryptAndAddMessage, addMessage]);
 
   // Helper to add a contact by username
   const handleAddContact = async (
@@ -398,6 +477,60 @@ export function useSessionManager() {
     return res;
   };
 
+  // TODO: Fix/trigger this for odler messages
+  const loadOlderMessages = useCallback(async () => {
+    if (!activeConversationId) return;
+
+    // Determine offset based on currently loaded historical messages
+    const currentMsgCount = activeMessages.filter(
+      (m) => m.text === "[Historical Message - Ciphertext Only]",
+    ).length;
+
+    try {
+      const rows = await messageRepo.getRecentMessages(
+        activeConversationId,
+        30,
+        currentMsgCount,
+      );
+      if (rows.length === 0) return; // No more messages
+
+      const olderMsgs: EncryptedDbMessage[] = rows.map(
+        (row) =>
+          ({
+            id: row.id,
+            conversation_id: row.conversation_id,
+            sender: row.sender_id,
+            ciphertext: row.ciphertext,
+            iv: row.iv,
+            auth_tag: row.auth_tag,
+            dh_pub: row.dh_pub,
+            pn: row.pn,
+            n: row.n,
+            timestamp: row.created_at_server,
+            text: "[Historical Message - Ciphertext Only]",
+            isDecrypted: true,
+          }) as any,
+      );
+
+      setMessagesDB((prev) => {
+        const existing = prev[activeConversationId] || [];
+        // Prevent duplicates
+        const newMsgs = olderMsgs.filter(
+          (oldM) => !existing.some((m) => m.id === oldM.id),
+        );
+        return {
+          ...prev,
+          [activeConversationId]: [...newMsgs, ...existing].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          ),
+        };
+      });
+    } catch (err) {
+      console.error("[SessionManager] Failed to load older messages:", err);
+    }
+  }, [activeConversationId, activeMessages]);
+
   return {
     isReady,
     identities,
@@ -410,6 +543,7 @@ export function useSessionManager() {
     activeSession,
     activeMessages,
     addMessage,
+    loadOlderMessages,
     encryptOutgoingMessage,
     sendMessageToServer,
     handleAddContact,

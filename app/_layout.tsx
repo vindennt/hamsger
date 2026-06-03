@@ -13,6 +13,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { AuthProvider, useAuth } from "@/context/auth";
 import { supabase } from "@/lib/supabase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { DatabaseProvider } from "@/lib/database/DatabaseProvider";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -94,7 +95,10 @@ const layoutStyles = StyleSheet.create({
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <DatabaseProvider>
+        <RootLayoutNav />
+      </DatabaseProvider>
     </AuthProvider>
   );
 }
+

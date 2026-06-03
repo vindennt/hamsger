@@ -13,9 +13,9 @@ export const useChatState = () => {
     currentPeer,
     setCurrentPeer,
     activeConversationId,
-    activeSession,
     activeMessages,
     addMessage,
+    loadOlderMessages,
     encryptOutgoingMessage,
     sendMessageToServer,
     handleAddContact,
@@ -26,11 +26,7 @@ export const useChatState = () => {
 
   const [inputText, setInputText] = useState("");
 
-  const { decryptedMessages } = useDecryption(
-    identities[currentUser],
-    activeSession,
-    activeMessages,
-  );
+  const { decryptedMessages } = useDecryption(activeMessages);
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
@@ -68,12 +64,6 @@ export const useChatState = () => {
       text: ratchetMsg.ciphertext, // Server never sees plaintext
     };
 
-    // TODO: REmove
-    console.log(
-      `[Server DB] Sending encrypted blob from ${currentUser} for conv ${activeConversationId}:`,
-      serverDbMsg,
-    );
-
     const recipientIdentity = identities[currentPeer];
     if (recipientIdentity) {
       sendMessageToServer(recipientIdentity.uuid, serverDbMsg);
@@ -84,7 +74,6 @@ export const useChatState = () => {
       ...serverDbMsg,
       text: inputText.trim(), // plaintext is kept local only
       isDecrypted: true, // marked decrypted to prevent reprocessing on reload
-      // TODO: can we avoid hardcoded flag?
     } as any;
 
     addMessage(activeConversationId, localDbMsg);
@@ -103,6 +92,7 @@ export const useChatState = () => {
     inputText,
     setInputText,
     sendMessage,
+    loadOlderMessages,
     handleAddContact,
     pendingRequests,
     handleAcceptRequest,
