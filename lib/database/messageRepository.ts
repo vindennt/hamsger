@@ -1,4 +1,5 @@
 import { type SQLiteDatabase } from "expo-sqlite";
+import { aesDecrypt, aesEncrypt, getMasterKey } from "../crypto/secureStore";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +31,8 @@ export interface MessageRow {
   created_at_server: string;
   /** Client-side timestamp at send time. */
   timestamp: string;
+  /** Decrypted plaintext encrypted at rest with device AES key */
+  local_plaintext?: string;
 }
 
 /** Shape of a row in the `errors` table. */
@@ -118,12 +121,22 @@ export const messageRepo = {
    * @param msg - All fields required for the `messages` table.
    */
   async insertMessage(msg: InsertMessageParams): Promise<void> {
+    let encryptedPlaintext: string | null = null;
+    if (msg.local_plaintext) {
+      const masterKey = await getMasterKey();
+      if (masterKey) {
+        encryptedPlaintext = await aesEncrypt(msg.local_plaintext, masterKey);
+      } else {
+        encryptedPlaintext = msg.local_plaintext;
+      }
+    }
+
     await getDb().runAsync(
       `INSERT OR IGNORE INTO messages
         (id, conversation_id, sender_id, recipient_id,
          ciphertext, iv, auth_tag, dh_pub,
-         pn, n, created_at_server, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         pn, n, created_at_server, timestamp, local_plaintext)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         msg.id,
         msg.conversation_id,
@@ -137,6 +150,7 @@ export const messageRepo = {
         msg.n,
         msg.created_at_server,
         msg.timestamp,
+        encryptedPlaintext,
       ],
     );
   },
@@ -158,13 +172,37 @@ export const messageRepo = {
     limit: number = 30,
     offset: number = 0,
   ): Promise<MessageRow[]> {
-    return getDb().getAllAsync<MessageRow>(
+    const rows = await getDb().getAllAsync<MessageRow>(
       `SELECT * FROM messages
         WHERE conversation_id = ?
         ORDER BY created_at_server DESC
         LIMIT ? OFFSET ?`,
       [conversationId, limit, offset],
     );
+
+    const masterKey = await getMasterKey();
+    for (const row of rows) {
+      if (row.local_plaintext) {
+        if (masterKey) {
+          try {
+            row.local_plaintext = await aesDecrypt(
+              row.local_plaintext,
+              masterKey,
+            );
+          } catch {
+            row.local_plaintext = "[Decryption Failed]";
+          }
+        } else {
+          // Native encrypts loaclly becayse of secure enclave
+          // Web does not, and does not use dot structure, so we should not render natively encrypted text since it would be unreadable
+          // TODO: Make sure text cross platform is readable on web and native
+          if (row.local_plaintext.includes(".")) {
+            row.local_plaintext = "[Encrypted on Native]";
+          }
+        }
+      }
+    }
+    return rows;
   },
 
   /**
@@ -175,10 +213,28 @@ export const messageRepo = {
    *   `null` if not found.
    */
   async getMessageById(id: string): Promise<MessageRow | null> {
-    return getDb().getFirstAsync<MessageRow>(
+    const row = await getDb().getFirstAsync<MessageRow>(
       "SELECT * FROM messages WHERE id = ?",
       [id],
     );
+    if (row && row.local_plaintext) {
+      const masterKey = await getMasterKey();
+      if (masterKey) {
+        try {
+          row.local_plaintext = await aesDecrypt(
+            row.local_plaintext,
+            masterKey,
+          );
+        } catch {
+          row.local_plaintext = "[Decryption Failed]";
+        }
+      } else {
+        if (row.local_plaintext.includes(".")) {
+          row.local_plaintext = "[Encrypted on Native]";
+        }
+      }
+    }
+    return row;
   },
 
   // -----------------------------------------------------------------------

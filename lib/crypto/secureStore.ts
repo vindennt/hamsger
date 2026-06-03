@@ -18,7 +18,7 @@ async function getSecureStoreModule() {
 
 const MASTER_KEY_ALIAS = "hamsger_ratchet_master_key_v1";
 
-async function getMasterKey(): Promise<string | null> {
+export async function getMasterKey(): Promise<string | null> {
   const store = await getSecureStoreModule();
   if (!store) return null;
 
@@ -45,13 +45,20 @@ async function getMasterKey(): Promise<string | null> {
  * By encrypting the state with real AES-GCM using hardware key
  * Secure Enclave, SQLite file is safe since decryption key cannot be extracted
  */
-async function aesEncrypt(data: string, keyHex: string): Promise<string> {
+
+export async function aesEncrypt(
+  data: string,
+  keyHex: string,
+): Promise<string> {
   const { ciphertext, iv, authTag } = await X3DH.encrypt(keyHex, data);
   // Store as a single concatenated string: iv.authTag.ciphertext
   return `${iv}.${authTag}.${ciphertext}`;
 }
 
-async function aesDecrypt(data: string, keyHex: string): Promise<string> {
+export async function aesDecrypt(
+  data: string,
+  keyHex: string,
+): Promise<string> {
   const parts = data.split(".");
   if (parts.length !== 3) {
     throw new Error("Invalid encrypted state format");
