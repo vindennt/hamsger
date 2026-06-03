@@ -33,7 +33,23 @@ const decoder = new TextDecoder();
 let subtle: any;
 if (typeof globalThis !== "undefined" && globalThis.crypto?.subtle) {
   subtle = globalThis.crypto.subtle;
-} else {
+} else if (
+  typeof navigator !== "undefined" &&
+  navigator.product === "ReactNative"
+) {
+  try {
+    const ExpoCryptoModule = require("expo-crypto");
+    if (globalThis.crypto?.subtle) {
+      subtle = globalThis.crypto.subtle;
+    } else {
+      subtle = ExpoCryptoModule.subtle || (globalThis as any).crypto?.subtle;
+    }
+  } catch (e) {
+    console.warn("Failed to load expo-crypto subtle polyfill:", e);
+  }
+}
+
+if (!subtle) {
   try {
     const nodeCrypto = Function("return require('crypto')")();
     subtle = nodeCrypto.webcrypto?.subtle;
