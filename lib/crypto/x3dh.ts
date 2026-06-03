@@ -26,15 +26,8 @@ export function fromHex(hex: string): Uint8Array {
   return bytes;
 }
 
-// Stateful TextEncoder and TextDecoder fallbacks
-const encoder =
-  typeof TextEncoder !== "undefined"
-    ? new TextEncoder()
-    : new (require("util").TextEncoder)();
-const decoder =
-  typeof TextDecoder !== "undefined"
-    ? new TextDecoder()
-    : new (require("util").TextDecoder)();
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 // Dynamically resolve Web Crypto Subtle to prevent mobile bundle issues
 let subtle: any;
