@@ -15,18 +15,6 @@ export interface MessageRow {
   sender_id: string;
   /** User ID of the recipient. */
   recipient_id: string;
-  /** Base-64 encoded ciphertext. */
-  ciphertext: string;
-  /** Base-64 encoded initialisation vector. */
-  iv: string;
-  /** Base-64 encoded authentication tag (GCM). */
-  auth_tag: string;
-  /** Base-64 encoded ephemeral Diffie-Hellman public key. */
-  dh_pub: string;
-  /** Previous chain length (Double Ratchet `pn`). */
-  pn: number;
-  /** Message number within the current chain (Double Ratchet `n`). */
-  n: number;
   /** UTC ISO-8601 timestamp assigned by the server (Supabase). */
   created_at_server: string;
   /** Client-side timestamp at send time. */
@@ -133,21 +121,13 @@ export const messageRepo = {
 
     await getDb().runAsync(
       `INSERT OR IGNORE INTO messages
-        (id, conversation_id, sender_id, recipient_id,
-         ciphertext, iv, auth_tag, dh_pub,
-         pn, n, created_at_server, timestamp, local_plaintext)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, conversation_id, sender_id, recipient_id, created_at_server, timestamp, local_plaintext)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         msg.id,
         msg.conversation_id,
         msg.sender_id,
         msg.recipient_id,
-        msg.ciphertext,
-        msg.iv,
-        msg.auth_tag,
-        msg.dh_pub,
-        msg.pn,
-        msg.n,
         msg.created_at_server,
         msg.timestamp,
         encryptedPlaintext,

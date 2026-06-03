@@ -4,7 +4,7 @@ import { type SQLiteDatabase } from "expo-sqlite";
  * Current schema version. Bump this and add a new migration step
  * function (e.g. `migrateV1ToV2`) whenever the schema changes.
  */
-const LATEST_VERSION = 2;
+const LATEST_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Migration steps — one function per version bump
@@ -107,12 +107,32 @@ async function migrateV1ToV2(db: SQLiteDatabase): Promise<void> {
 }
 
 /**
+ * v2 → v3: Drop cryptographic columns to save space.
+ */
+async function migrateV2ToV3(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`BEGIN TRANSACTION;`);
+  try {
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN ciphertext;`);
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN iv;`);
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN auth_tag;`);
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN dh_pub;`);
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN pn;`);
+    await db.execAsync(`ALTER TABLE messages DROP COLUMN n;`);
+    await db.execAsync(`COMMIT;`);
+  } catch (e) {
+    await db.execAsync(`ROLLBACK;`);
+    throw e;
+  }
+}
+
+/**
  * Ordered list of migration functions.
  * Index 0 = v0→v1, index 1 = v1→v2, etc.
  */
 const MIGRATIONS: readonly ((db: SQLiteDatabase) => Promise<void>)[] = [
   migrateV0ToV1,
   migrateV1ToV2,
+  migrateV2ToV3,
 ];
 
 // ---------------------------------------------------------------------------
