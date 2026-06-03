@@ -1,3 +1,4 @@
+import { IconSymbol } from "@/components/ui/icon-symbol";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +15,6 @@ import {
 import { supabase } from "../../lib/supabase";
 import { styles } from "./styles/index.web";
 import { useChatState } from "./useChatState";
-import { IconSymbol } from "@/components/ui/icon-symbol";
 
 export default function ChatScreen() {
   const {
@@ -58,7 +58,11 @@ export default function ChatScreen() {
   }, [isDrawerOpen, drawerWidth]);
 
   useEffect(() => {
-    scrollViewRef.current?.scrollToEnd({ animated: true });
+    // Hard coded load delay so that scrollToEnd works
+    // TODO: Better way to ensure messages are loaded before scrolling?
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   }, [messages]);
 
   const handleKeyPress = (e: any) => {
@@ -134,9 +138,17 @@ export default function ChatScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {pendingRequests && pendingRequests.length > 0 && (
-          <View style={{ marginBottom: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#E5E5EA" }}>
+          <View
+            style={{
+              marginBottom: 16,
+              borderBottomWidth: StyleSheet.hairlineWidth,
+              borderBottomColor: "#E5E5EA",
+            }}
+          >
             <View style={[styles.contactsHeader, { paddingVertical: 6 }]}>
-              <Text style={[styles.contactsTitle, { color: "#007AFF" }]}>REQUESTS ({pendingRequests.length})</Text>
+              <Text style={[styles.contactsTitle, { color: "#007AFF" }]}>
+                REQUESTS ({pendingRequests.length})
+              </Text>
             </View>
             {pendingRequests.map((req) => (
               <View
@@ -150,7 +162,14 @@ export default function ChatScreen() {
                 }}
               >
                 <View style={{ flex: 1, marginRight: 8 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "500", color: "#000000" }} numberOfLines={1}>
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: "500",
+                      color: "#000000",
+                    }}
+                    numberOfLines={1}
+                  >
                     {req.profiles?.username || "Unknown"}
                   </Text>
                   <Text style={{ fontSize: 11, color: "#8E8E93" }}>
@@ -165,10 +184,20 @@ export default function ChatScreen() {
                       paddingVertical: 4,
                       borderRadius: 6,
                     }}
-                    onPress={() => handleAcceptRequest(req.id, req.from_user_id)}
+                    onPress={() =>
+                      handleAcceptRequest(req.id, req.from_user_id)
+                    }
                     activeOpacity={0.7}
                   >
-                    <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>Accept</Text>
+                    <Text
+                      style={{
+                        color: "#ffffff",
+                        fontSize: 11,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Accept
+                    </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={{
@@ -180,7 +209,15 @@ export default function ChatScreen() {
                     onPress={() => handleRejectRequest(req.id)}
                     activeOpacity={0.7}
                   >
-                    <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "600" }}>Decline</Text>
+                    <Text
+                      style={{
+                        color: "#ffffff",
+                        fontSize: 11,
+                        fontWeight: "600",
+                      }}
+                    >
+                      Decline
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -265,14 +302,8 @@ export default function ChatScreen() {
             >
               {!currentPeer ? (
                 <View style={styles.emptyState}>
-                  <IconSymbol
-                    name="message.fill"
-                    size={40}
-                    color="#D1D1D6"
-                  />
-                  <Text
-                    style={[styles.emptyStateText, { marginTop: 12 }]}
-                  >
+                  <IconSymbol name="message.fill" size={40} color="#D1D1D6" />
+                  <Text style={[styles.emptyStateText, { marginTop: 12 }]}>
                     {isMobile
                       ? "Tap the menu icon to select a contact"
                       : "Select a contact to start messaging"}
@@ -292,9 +323,7 @@ export default function ChatScreen() {
                       key={msg.id}
                       style={[
                         styles.messageRow,
-                        isMe
-                          ? styles.messageRowMe
-                          : styles.messageRowOther,
+                        isMe ? styles.messageRowMe : styles.messageRowOther,
                       ]}
                     >
                       {!isMe && (
@@ -307,9 +336,7 @@ export default function ChatScreen() {
                       <View
                         style={[
                           styles.bubble,
-                          isMe
-                            ? styles.bubbleMe
-                            : styles.bubbleOther,
+                          isMe ? styles.bubbleMe : styles.bubbleOther,
                         ]}
                       >
                         <Text
@@ -325,9 +352,7 @@ export default function ChatScreen() {
                         <Text
                           style={[
                             styles.timeText,
-                            isMe
-                              ? styles.timeTextMe
-                              : styles.timeTextOther,
+                            isMe ? styles.timeTextMe : styles.timeTextOther,
                           ]}
                         >
                           {msg.timestamp.toLocaleTimeString([], {
@@ -369,20 +394,14 @@ export default function ChatScreen() {
               disabled={!inputText.trim() || !currentPeer}
               activeOpacity={0.7}
             >
-              <IconSymbol
-                name="paperplane.fill"
-                size={16}
-                color="#ffffff"
-              />
+              <IconSymbol name="paperplane.fill" size={16} color="#ffffff" />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* MOBILE DRAWER BACKDROP */}
         {isMobile && isDrawerOpen && (
-          <TouchableWithoutFeedback
-            onPress={() => setIsDrawerOpen(false)}
-          >
+          <TouchableWithoutFeedback onPress={() => setIsDrawerOpen(false)}>
             <View
               style={{
                 position: "absolute",

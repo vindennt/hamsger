@@ -113,9 +113,49 @@ export function useSessionManager() {
 
   useEffect(() => {
     if (!user) return;
+
+    // Initial fetch
     fetchPendingRequests(user.id).then((data) => {
       setPendingRequests(data || []);
     });
+
+    // Subscribe to friend_requests changes
+    const channelName = `friend_requests_${user.id}_${Date.now()}`;
+    const subscription = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friend_requests",
+        },
+        (payload) => {
+          const row = (payload.new || payload.old) as any;
+          if (
+            row &&
+            (row.to_user_id === user.id || row.from_user_id === user.id)
+          ) {
+            console.log("[Supabase Realtime] Friend request update detected");
+            // Refetch to get the latest joined profile data
+            fetchPendingRequests(user.id).then((data) => {
+              setPendingRequests(data || []);
+            });
+
+            // Trigger refresh if a request was accepted so contacts update
+            // TODO: More graceful way to do this?
+            if (payload.eventType === "UPDATE" && row.status === "accepted") {
+              setIsReady(false);
+              setRefreshTrigger((prev) => prev + 1);
+            }
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [user, refreshTrigger]);
 
   const activeConversationId =
@@ -135,6 +175,10 @@ export function useSessionManager() {
       setMessagesDB((prev) => {
         const existing = prev[convId] || [];
         if (existing.some((m) => m.id === msg.id)) return prev; // prevent duplicates
+
+        console.log(
+          `[useSessionManager] Adding message ${msg.id} to UI for ${convId}`,
+        );
         return {
           ...prev,
           [convId]: [...existing, msg].sort(
@@ -253,6 +297,7 @@ export function useSessionManager() {
             n: msg.n,
             created_at_server: msg.timestamp,
             timestamp: new Date().toISOString(),
+            local_plaintext: plaintext,
           });
         } catch (dbErr) {
           console.error(
@@ -345,6 +390,7 @@ export function useSessionManager() {
     }
   };
 
+  // Load local messages for the active conversation
   useEffect(() => {
     if (!user || !isReady || !activeConversationId) return;
 
@@ -368,8 +414,9 @@ export function useSessionManager() {
             pn: row.pn,
             n: row.n,
             timestamp: row.created_at_server,
-            text: "[Historical Message - Ciphertext Only]",
-            isDecrypted: true, // TODO: decrpyt older messages
+            text:
+              row.local_plaintext || "[Historical Message - Ciphertext Only]",
+            isDecrypted: true,
           } as any;
           addMessage(row.conversation_id, uiMsg);
         }
@@ -379,6 +426,11 @@ export function useSessionManager() {
     };
 
     loadLocalMessages();
+  }, [user, isReady, activeConversationId, addMessage]);
+
+  // Subscribe to new incoming real time queue messages globally
+  useEffect(() => {
+    if (!user || !isReady) return;
 
     // 1. Fetch initial messages from Server (Queue)
     const fetchInitialMessages = async () => {
@@ -409,20 +461,24 @@ export function useSessionManager() {
 
     fetchInitialMessages();
 
-    // 2. Subscribe to new messages
+    // 2. Subscribe to new messages using a unique channel name per user session
+    const channelName = `message_queue_${user.id}_${Date.now()}`;
     const subscription = supabase
-      .channel("message_queue_channel")
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "message_queue",
-          filter: `recipient_id=eq.${user.id}`,
         },
         async (payload) => {
           const newRow = payload.new as any;
           if (newRow && newRow.payload) {
+            // Client-side verification that we are the recipient
+            if (newRow.recipient_id !== user.id) return;
+
+            console.log("[Supabase Realtime] Received new message:", newRow.id);
             const newMsg = newRow.payload as EncryptedDbMessage;
             await decryptAndAddMessage(newMsg.conversation_id, newMsg);
 
@@ -431,12 +487,15 @@ export function useSessionManager() {
           }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`[Supabase Realtime] Subscription status:`, status);
+      });
 
     return () => {
+      console.log(`[Supabase Realtime] Removing channel`, channelName);
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, activeConversationId, decryptAndAddMessage, addMessage]);
+  }, [user, isReady, decryptAndAddMessage]);
 
   // Helper to add a contact by username
   const handleAddContact = async (
@@ -477,14 +536,11 @@ export function useSessionManager() {
     return res;
   };
 
-  // TODO: Fix/trigger this for odler messages
   const loadOlderMessages = useCallback(async () => {
     if (!activeConversationId) return;
 
-    // Determine offset based on currently loaded historical messages
-    const currentMsgCount = activeMessages.filter(
-      (m) => m.text === "[Historical Message - Ciphertext Only]",
-    ).length;
+    // Determine offset based on all currently loaded messages for this conversation
+    const currentMsgCount = activeMessages.length;
 
     try {
       const rows = await messageRepo.getRecentMessages(
@@ -507,7 +563,8 @@ export function useSessionManager() {
             pn: row.pn,
             n: row.n,
             timestamp: row.created_at_server,
-            text: "[Historical Message - Ciphertext Only]",
+            text:
+              row.local_plaintext || "[Historical Message - Ciphertext Only]", // TODO: Should no longer have "historical messages'"
             isDecrypted: true,
           }) as any,
       );
