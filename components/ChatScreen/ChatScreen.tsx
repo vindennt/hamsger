@@ -52,7 +52,7 @@ export default function ChatScreen() {
       duration: 280,
       useNativeDriver: true,
     }).start();
-  }, [isDrawerOpen, drawerWidth]);
+  }, [isDrawerOpen, drawerWidth, drawerAnim]);
 
   useEffect(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });

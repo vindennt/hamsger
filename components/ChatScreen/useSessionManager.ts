@@ -1,5 +1,5 @@
 import { useAuth } from "@/context/auth";
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   acceptFriendRequest,
   fetchPendingRequests,
@@ -167,7 +167,7 @@ export function useSessionManager() {
       : "";
 
   const activeSession = sessions[activeConversationId];
-  const activeMessages = messagesDB[activeConversationId] || [];
+  const activeMessages = React.useMemo(() => messagesDB[activeConversationId] || [], [messagesDB, activeConversationId]);
 
   // TODO: implement message pagination
   const addMessage = useCallback(
@@ -289,12 +289,6 @@ export function useSessionManager() {
             conversation_id: convId,
             sender_id: msg.sender,
             recipient_id: currentUserId,
-            ciphertext: msg.ciphertext,
-            iv: msg.iv,
-            auth_tag: msg.auth_tag,
-            dh_pub: msg.dh_pub,
-            pn: msg.pn,
-            n: msg.n,
             created_at_server: msg.timestamp,
             timestamp: new Date().toISOString(),
             local_plaintext: plaintext,
@@ -407,15 +401,9 @@ export function useSessionManager() {
             id: row.id,
             conversation_id: row.conversation_id,
             sender: row.sender_id,
-            ciphertext: row.ciphertext,
-            iv: row.iv,
-            auth_tag: row.auth_tag,
-            dh_pub: row.dh_pub,
-            pn: row.pn,
-            n: row.n,
             timestamp: row.created_at_server,
             text:
-              row.local_plaintext || "[Historical Message - Ciphertext Only]",
+              row.local_plaintext || "[Historical Message - Missing Plaintext]",
             isDecrypted: true,
           } as any;
           addMessage(row.conversation_id, uiMsg);
@@ -556,15 +544,9 @@ export function useSessionManager() {
             id: row.id,
             conversation_id: row.conversation_id,
             sender: row.sender_id,
-            ciphertext: row.ciphertext,
-            iv: row.iv,
-            auth_tag: row.auth_tag,
-            dh_pub: row.dh_pub,
-            pn: row.pn,
-            n: row.n,
             timestamp: row.created_at_server,
             text:
-              row.local_plaintext || "[Historical Message - Ciphertext Only]", // TODO: Should no longer have "historical messages'"
+              row.local_plaintext || "[Historical Message - Missing Plaintext]", // TODO: Should no longer have "historical messages'"
             isDecrypted: true,
           }) as any,
       );

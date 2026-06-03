@@ -55,7 +55,7 @@ export default function ChatScreen() {
       duration: 280,
       useNativeDriver: true,
     }).start();
-  }, [isDrawerOpen, drawerWidth]);
+  }, [isDrawerOpen, drawerWidth, drawerAnim]);
 
   useEffect(() => {
     // Hard coded load delay so that scrollToEnd works
@@ -234,7 +234,7 @@ export default function ChatScreen() {
                 letterSpacing: -0.24,
               }}
             >
-              No contacts yet. Tap '+' to add a friend.
+              No contacts yet. Tap &apos;+&apos; to add a friend.
             </Text>
           </View>
         ) : (
