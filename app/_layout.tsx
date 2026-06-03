@@ -9,6 +9,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import "react-native-reanimated";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
+import { layoutStyles } from "./_layout.styles";
 
 import { AuthProvider, useAuth } from "@/context/auth";
 import { supabase } from "@/lib/supabase";
@@ -51,7 +52,7 @@ function RootLayoutNav() {
           router.replace("/(tabs)");
         });
     }
-  }, [session, isLoading, segments]);
+  }, [session, isLoading, segments, router]);
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -76,21 +77,6 @@ function RootLayoutNav() {
   );
 }
 
-const layoutStyles = StyleSheet.create({
-  overlay: {
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    zIndex: 9999,
-  },
-  overlayText: {
-    marginTop: 16,
-    fontSize: 15,
-    fontWeight: "500",
-    color: "#8E8E93",
-    letterSpacing: -0.24,
-  },
-});
 
 export default function RootLayout() {
   return (
