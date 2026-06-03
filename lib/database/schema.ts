@@ -1,10 +1,10 @@
 import { type SQLiteDatabase } from "expo-sqlite";
 
 /**
- *  TODO: Reset everything to V1 at initial release.
- *  TODO: Add new migration steps if needed
+ * Current schema version. Bump this and add a new migration step
+ * function (e.g. `migrateV1ToV2`) whenever the schema changes.
  */
-const LATEST_VERSION = 1;
+const LATEST_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Migration steps — one function per version bump
@@ -81,10 +81,30 @@ async function migrateV0ToV1(db: SQLiteDatabase): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// TODO: Future migraitons here
+// Future migration steps go here, e.g.:
 //
-// async function migrateV1ToV2(db: SQLiteDatabase): Promise<void> { … }
+// async function migrateV2ToV3(db: SQLiteDatabase): Promise<void> { … }
 // ---------------------------------------------------------------------------
+
+/**
+ * v1 → v2: Add local_plaintext to messages.
+ *
+ * To support displaying historical messages without breaking forward secrecy,
+ * we store the decrypted plaintext locally. It is encrypted at rest using a
+ * hardware backed AES master key.
+ */
+async function migrateV1ToV2(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`BEGIN TRANSACTION;`);
+  try {
+    await db.execAsync(`
+      ALTER TABLE messages ADD COLUMN local_plaintext TEXT;
+    `);
+    await db.execAsync(`COMMIT;`);
+  } catch (e) {
+    await db.execAsync(`ROLLBACK;`);
+    throw e;
+  }
+}
 
 /**
  * Ordered list of migration functions.
@@ -92,7 +112,7 @@ async function migrateV0ToV1(db: SQLiteDatabase): Promise<void> {
  */
 const MIGRATIONS: readonly ((db: SQLiteDatabase) => Promise<void>)[] = [
   migrateV0ToV1,
-  // migrateV1ToV2,
+  migrateV1ToV2,
 ];
 
 // ---------------------------------------------------------------------------
