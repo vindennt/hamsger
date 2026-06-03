@@ -1,41 +1,35 @@
-import { Platform } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { type SQLiteDatabase } from "expo-sqlite";
-
 let dbInstance: SQLiteDatabase | null = null;
 
-export function setKvDb(db: SQLiteDatabase) {
+function getDb(): SQLiteDatabase {
+  if (!dbInstance) {
+    throw new Error(
+      "[kv] Database not initialised. Ensure <DatabaseProvider> wraps the component tree.",
+    );
+  }
+  return dbInstance;
+}
+export function setKvDb(db: SQLiteDatabase): void {
   dbInstance = db;
 }
 
 export const kv = {
   async get(key: string): Promise<string | null> {
-    if (Platform.OS === "web" || !dbInstance) {
-      return await AsyncStorage.getItem(key);
-    }
-    const result = dbInstance.getFirstSync<{ value: string }>(
+    const row = await getDb().getFirstAsync<{ value: string }>(
       "SELECT value FROM key_value_store WHERE key = ?",
-      [key]
+      [key],
     );
-    return result ? result.value : null;
+    return row ? row.value : null;
   },
 
   async set(key: string, value: string): Promise<void> {
-    if (Platform.OS === "web" || !dbInstance) {
-      await AsyncStorage.setItem(key, value);
-      return;
-    }
-    dbInstance.runSync(
+    await getDb().runAsync(
       "INSERT OR REPLACE INTO key_value_store (key, value) VALUES (?, ?)",
-      [key, value]
+      [key, value],
     );
   },
 
   async remove(key: string): Promise<void> {
-    if (Platform.OS === "web" || !dbInstance) {
-      await AsyncStorage.removeItem(key);
-      return;
-    }
-    dbInstance.runSync("DELETE FROM key_value_store WHERE key = ?", [key]);
-  }
+    await getDb().runAsync("DELETE FROM key_value_store WHERE key = ?", [key]);
+  },
 };

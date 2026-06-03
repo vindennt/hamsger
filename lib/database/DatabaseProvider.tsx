@@ -1,25 +1,24 @@
-import { Platform } from "react-native";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
-import { migrateDbIfNeeded } from "./schema";
+import React, { useEffect } from "react";
 import { setKvDb } from "./kv";
-import { useEffect } from "react";
-
+import { setMessageDb } from "./messageRepository";
+import { migrateDbIfNeeded } from "./schema";
 function DatabaseInitializer({ children }: { children: React.ReactNode }) {
   const db = useSQLiteContext();
-  
+
   useEffect(() => {
     setKvDb(db);
+    setMessageDb(db);
   }, [db]);
 
   return <>{children}</>;
 }
 
+/**
+ * Native: native SQLITE c
+ * Web: Wasm SQLITE
+ */
 export function DatabaseProvider({ children }: { children: React.ReactNode }) {
-  if (Platform.OS === "web") {
-    // Web falls back to AsyncStorage via our kv abstraction
-    return <>{children}</>;
-  }
-
   return (
     <SQLiteProvider databaseName="hamsger.db" onInit={migrateDbIfNeeded}>
       <DatabaseInitializer>{children}</DatabaseInitializer>
