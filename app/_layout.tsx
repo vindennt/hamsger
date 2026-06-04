@@ -9,7 +9,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import "react-native-reanimated";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
-import { layoutStyles } from "./_layout.styles";
+import { layoutStyles } from "@/components/styles/_layout.styles";
 
 import { AuthProvider, useAuth } from "@/context/auth";
 import { supabase } from "@/lib/supabase";

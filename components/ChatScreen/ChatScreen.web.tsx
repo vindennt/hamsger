@@ -17,6 +17,7 @@ import { styles } from "./styles/index.web";
 import { useChatState } from "./useChatState";
 
 export default function ChatScreen() {
+  console.log("ChatScreen Render", Date.now());
   const {
     isReady,
     currentUser,
