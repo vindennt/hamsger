@@ -24,6 +24,8 @@ interface ChatState {
   addMessage: (convId: ConversationId, msg: EncryptedDbMessage) => void;
   setMessages: (convId: ConversationId, messages: EncryptedDbMessage[]) => void;
 
+  initData: (contacts: UserIdentity[], identities: Record<string, UserIdentity>, sessions: Record<string, SessionContext>, peer: string) => void;
+
   setPendingRequests: (requests: any[]) => void;
   
   reset: () => void;
@@ -49,6 +51,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   addSession: (convId, session) => set((state) => ({
     sessions: { ...state.sessions, [convId]: session }
   })),
+
+  initData: (contacts, identities, sessions, peer) => set({
+    contacts,
+    identities,
+    sessions,
+    currentPeer: peer,
+    isReady: true,
+  }),
 
   addMessage: (convId, msg) => set((state) => {
     const existing = state.messagesDB[convId] || [];

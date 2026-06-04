@@ -26,7 +26,7 @@ export async function getMasterKey(): Promise<string | null> {
   if (!key) {
     const Crypto = require("expo-crypto");
     const bytes = Crypto.getRandomBytes(32);
-    key = Array.from(bytes)
+    key = Array.from(bytes as Uint8Array)
       .map((b: number) => b.toString(16).padStart(2, "0"))
       .join("");
     await store.setItemAsync(MASTER_KEY_ALIAS, key, {
