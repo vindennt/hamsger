@@ -43,3 +43,5 @@ scripts/
 # generated native folders
 /ios
 /android
+
+/ui-templates
