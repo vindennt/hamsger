@@ -69,7 +69,8 @@ export interface SessionContext {
   SK: string;
   meta: {
     initiatorDHsCore: string;
+    initiatorDHsPub: string;
     responderRatchetPub: string;
-    responderRatchetPriv: string;
+    responderRatchetPriv?: string;
   };
 }
