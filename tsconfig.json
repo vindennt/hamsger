@@ -13,5 +13,11 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "scripts/combined/run.ts",
+    "scripts/double_ratchet/run.ts",
+    "scripts/hamsger_cli/run.ts"
   ]
 }
