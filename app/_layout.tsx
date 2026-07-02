@@ -1,4 +1,5 @@
 // App entry layout
+import { layoutStyles } from "@/components/styles/_layout.styles";
 import {
   DarkTheme,
   DefaultTheme,
@@ -7,14 +8,25 @@ import {
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import "react-native-reanimated";
-import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
-import { layoutStyles } from "@/components/styles/_layout.styles";
 
 import { AuthProvider, useAuth } from "@/context/auth";
-import { supabase } from "@/lib/supabase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { DatabaseProvider } from "@/lib/database/DatabaseProvider";
+import {
+  forceExpireSession,
+  isSessionExpired,
+  recordActivity,
+} from "@/lib/session/sessionExpiry";
+import { supabase } from "@/lib/supabase";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -31,28 +43,66 @@ function RootLayoutNav() {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
+    // TODO: DOnt hardcode this fucking screen later
+    const isPostAuthScreen =
+      segments[1] === "setup-pin" || segments[1] === "restore-keys";
 
     if (!session && !inAuthGroup) {
       router.replace("/(auth)/sign-in");
-    } else if (session && inAuthGroup) {
+    } else if (session && inAuthGroup && !isPostAuthScreen) {
       setIsSyncingProfile(true);
       supabase
         .from("profiles")
         .select("id")
         .eq("id", session.user.id)
-        .single()
+        .maybeSingle()
         .then(async ({ data }) => {
           if (!data) {
             const username =
               session.user.user_metadata?.username ||
               `user_${session.user.id.substring(0, 8)}`;
-            await supabase.from("profiles").upsert({ id: session.user.id, username });
+            await supabase
+              .from("profiles")
+              .upsert({ id: session.user.id, username });
           }
           setIsSyncingProfile(false);
           router.replace("/(tabs)");
         });
     }
   }, [session, isLoading, segments, router]);
+
+  // Record activity on session start to expire stale sessions
+  // Separate from the navigation guard
+  useEffect(() => {
+    if (!session) return;
+
+    async function checkAndRecord() {
+      const expired = await isSessionExpired();
+      if (expired) {
+        await forceExpireSession();
+        router.replace("/(auth)/sign-in");
+      } else {
+        await recordActivity();
+      }
+    }
+
+    checkAndRecord();
+
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkAndRecord();
+    });
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.addEventListener("focus", checkAndRecord);
+    }
+
+    return () => {
+      sub.remove();
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.removeEventListener("focus", checkAndRecord);
+      }
+    };
+  }, [session, router]);
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
@@ -77,7 +127,6 @@ function RootLayoutNav() {
   );
 }
 
-
 export default function RootLayout() {
   return (
     <AuthProvider>
@@ -87,4 +136,3 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
-
