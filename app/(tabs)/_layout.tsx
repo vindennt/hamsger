@@ -16,7 +16,8 @@ export default function TabLayout() {
         tabBarActiveTintColor: "#007AFF",
         tabBarInactiveTintColor: isDark ? "#636366" : "#8E8E93",
         tabBarStyle: {
-          display: "none",
+          backgroundColor: isDark ? "#1C1C1E" : "#F9F9F9",
+          borderTopColor: isDark ? "#38383A" : "#E5E5EA",
         },
         headerShown: false,
         tabBarButton: HapticTab,
@@ -28,6 +29,15 @@ export default function TabLayout() {
           title: "Messages",
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="message.fill" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={24} name="gearshape.fill" color={color} />
           ),
         }}
       />
