@@ -32,4 +32,11 @@ export const kv = {
   async remove(key: string): Promise<void> {
     await getDb().runAsync("DELETE FROM key_value_store WHERE key = ?", [key]);
   },
+
+  async getAllByPrefix(prefix: string): Promise<{ key: string; value: string }[]> {
+    return getDb().getAllAsync<{ key: string; value: string }>(
+      "SELECT key, value FROM key_value_store WHERE key LIKE ?",
+      [`${prefix}%`],
+    );
+  },
 };
