@@ -257,4 +257,23 @@ export const messageRepo = {
       [limit],
     );
   },
+
+  // Returns all messages with local_plaintext decrypted from the device key,
+  // so the result is portable to other devices via the backup bundle.
+  async getAllMessagesDecrypted(): Promise<MessageRow[]> {
+    const rows = await getDb().getAllAsync<MessageRow>(
+      "SELECT * FROM messages ORDER BY created_at_server ASC",
+    );
+    const masterKey = await getMasterKey();
+    for (const row of rows) {
+      if (row.local_plaintext && masterKey) {
+        try {
+          row.local_plaintext = await aesDecrypt(row.local_plaintext, masterKey);
+        } catch {
+          row.local_plaintext = undefined;
+        }
+      }
+    }
+    return rows;
+  },
 };
