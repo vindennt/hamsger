@@ -5,10 +5,8 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
-  Switch,
   Text,
   TextInput,
   View,
@@ -20,7 +18,6 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [bypassVerification, setBypassVerification] = useState(true); // TODO: remove debug bypass
   const router = useRouter();
   async function handleSignUp() {
     if (!username || !email || !password) {
@@ -76,7 +73,7 @@ export default function SignUpScreen() {
         );
 
       const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session && !bypassVerification) {
+      if (!sessionData.session) {
         router.replace({ pathname: "/(auth)/verify-email", params: { email } });
       } else {
         router.replace("/(tabs)");
@@ -86,10 +83,7 @@ export default function SignUpScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <KeyboardAvoidingView style={styles.root} behavior="padding">
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
@@ -118,23 +112,6 @@ export default function SignUpScreen() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry
-            />
-          </View>
-
-          {/* TODO: Remove later */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <Text style={{ fontSize: 13, color: "#8e8e93" }}>
-              Bypass email verification (Debug)
-            </Text>
-            <Switch
-              value={bypassVerification}
-              onValueChange={setBypassVerification}
             />
           </View>
 

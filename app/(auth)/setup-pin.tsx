@@ -196,10 +196,6 @@ function PinField({
 }
 
 const local = StyleSheet.create({
-  debugHint: {
-    fontSize: 12,
-    color: "#8e8e93",
-  },
   wordGrid: {
     flexDirection: "row",
     flexWrap: "wrap",

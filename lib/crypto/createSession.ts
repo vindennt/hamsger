@@ -48,13 +48,7 @@ export function createSession(
       fromHex(initPubKey),
     );
   } else {
-    // If no private key is provided (e.g., fallback/simulation), simulate a secure shared secret
-    // TODO: remove any simulatsion code and require proper key exchange for real security
-    const dummyPriv = new KeyPair().privateKey;
-    sharedSecretBytes = x25519.getSharedSecret(
-      fromHex(dummyPriv),
-      fromHex(respPubKey),
-    );
+    throw new Error("createSession requires either initiator or responder private key");
   }
 
   const SS = toHex(sharedSecretBytes);
