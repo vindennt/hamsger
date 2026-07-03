@@ -1,50 +1,32 @@
-# Welcome to your Expo app 👋
+# hamsger
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+End-to-end encrypted messaging for iOS and web. Messages are encrypted on-device using X3DH key exchange and the Double Ratchet algorithm. Server should never see plaintext.
 
-## Get started
+## How it works
 
-1. Install dependencies
+- **X3DH** establishes a shared secret between two users without a key negotiation round trip
+- **Double Ratchet** derives a new encryption key for every message, so compromising one message doesn't expose others
+- **Keys never leave the device unencrypted.** A PIN-derived key wraps the key bundle before it's stored in the cloud. A 12-word BIP-39 recovery phrase provides a second decryption path if the PIN is lost.
 
-   ```bash
-   npm install
-   ```
+## Stack
 
-2. Start the app
+- Expo Router (iOS + web)
+- Supabase (auth, realtime message queue, encrypted key backup)
+- SQLite via expo-sqlite (local message store, encrypted at rest on native)
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Running locally
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Copy `.env.local.example` to `.env.local` and fill in your Supabase project URL and anon key.
 
-## Learn more
+## Deploying
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+npx expo export --platform web   # output goes to dist/
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Vercel picks up `vercel.json` automatically on push.
