@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -66,25 +65,25 @@ export default function SignUpScreen() {
     }
 
     if (user) {
-      const { error: profileError } = await supabase
+      await supabase
         .from("profiles")
-        .insert({ id: user.id, username: cleanUsername });
+        .upsert(
+          { id: user.id, username: cleanUsername },
+          { onConflict: "id", ignoreDuplicates: true },
+        );
 
-      if (profileError) {
-        Alert.alert("Error", profileError.message);
-        setLoading(false);
-        return;
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        router.replace({ pathname: "/(auth)/verify-email", params: { email } });
+      } else {
+        router.replace("/(tabs)");
       }
-      router.replace("/(tabs)");
     }
     setLoading(false);
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <KeyboardAvoidingView style={styles.root} behavior="padding">
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
