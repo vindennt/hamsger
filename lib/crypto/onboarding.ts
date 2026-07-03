@@ -37,12 +37,7 @@ async function storeKeyPairs(
   await keystore.set(`sig_pub_${userId}`, sigKP.publicKey);
 }
 
-/**
- * Generates fresh E2EE key material, stores it locally, and publishes public
- * keys to Supabase. Deletes any existing key backup before re-keying.
- * Called from the restore screen's "Reset Keys" escape hatch.
- */
-// Clears identity key material on session expiry to require PIN re-entry.
+// Clears identity key material to require PIN re-entry on next launch.
 // Ratchet states are intentionally preserved — they cannot be reconstructed
 // from backup without breaking in-progress conversations.
 export async function clearLocalKeyMaterial(userId: string): Promise<void> {
@@ -95,8 +90,7 @@ async function ensureProfileExists(
       { onConflict: "id", ignoreDuplicates: true },
     );
   if (error) {
-    // Profle might already exist due
-    console.warn("[Crypto Onboarding] Profile upsert warning:", error.message);
+    console.warn("[onboarding] profile upsert:", error.message);
   }
 }
 
@@ -106,15 +100,6 @@ export interface KeyVerificationResult {
   needsRestore?: boolean;
 }
 
-/**
- * Checks if the user's E2EE public keys are registered on database.
- * If no, generates Identity, Signed Prekey, and 5 One-Time Prekeys,
- * with local keystores having private keys and database receiving public keys.
- * Returns the active user's identity public key plus onboarding flags.
- *
- * needsPinSetup: new keys were just generated; guide user to set a PIN backup
- * needsRestore:  server has a bundle but local keys are missing; guide user to restore
- */
 export async function verifyUserKeysExist(
   userId: string,
   username: string,
@@ -129,11 +114,8 @@ export async function verifyUserKeysExist(
     .maybeSingle();
 
   if (bundleError) {
-    // Server unreachable dont overwrite keys until fixed.
-    // Fall back to local keys if present; otherwise surface the connectivity failure.
     const localPub = await keystore.get(`ik_pub_${userId}`);
     if (localPub && !localPub.startsWith("pub_") && localPub.length === 64) {
-      console.warn("[Crypto Onboarding] Server unreachable, using local keys.");
       return { identityKey: localPub };
     }
     throw new Error(
@@ -142,10 +124,6 @@ export async function verifyUserKeysExist(
   }
 
   if (!bundleData) {
-    // No bundle exsits anymore, so just generate fresh keys
-    console.log(
-      "[Crypto Onboarding] No prekey bundle found. Generating E2EE keys.",
-    );
     const ik = new KeyPair("IK");
     const spk = new KeyPair("SPK");
     const sigKP = new SigningKeyPair();
@@ -181,13 +159,11 @@ export async function verifyUserKeysExist(
     return { identityKey: ik.publicKey, needsPinSetup: true };
   }
 
-  // Server bundle exists — verify local private keys are present.
   const localPub = await keystore.get(`ik_pub_${userId}`);
   const isLegacyKey =
     localPub && (localPub.startsWith("pub_") || localPub.length !== 64);
 
   if (!localPub || isLegacyKey) {
-    console.log("[Crypto Onboarding] Local keys missing. Prompting restore.");
     return { identityKey: bundleData.identity_key, needsRestore: true };
   }
 

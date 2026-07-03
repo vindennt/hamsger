@@ -18,10 +18,7 @@ import {
   refreshBackupBundle,
   saveBackupToCloud,
 } from "../../lib/crypto/pinBackup";
-import {
-  forceExpireSession,
-  setForceExpireOnNextLaunch,
-} from "../../lib/session/sessionExpiry";
+import { forceExpireSession } from "../../lib/session/sessionExpiry";
 
 export default function SettingsScreen() {
   const { user, signOut } = useAuth();
@@ -68,27 +65,6 @@ export default function SettingsScreen() {
     setLoading(false);
   }
 
-  async function handleExpireOnNextLaunch() {
-    Alert.alert(
-      "Force Expire Session",
-      "Session will be marked expired. Sign-in is required on next launch.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Expire",
-          style: "destructive",
-          onPress: async () => {
-            await setForceExpireOnNextLaunch();
-            Alert.alert(
-              "Done",
-              "Session marked as expired. Relaunch the app to verify.",
-            );
-          },
-        },
-      ],
-    );
-  }
-
   async function handleExpireNow() {
     setLoading(true);
     try {
@@ -99,7 +75,6 @@ export default function SettingsScreen() {
     }
   }
 
-  // TODO: remove debug features for public; only to admin accounts
   return (
     <SafeAreaView style={styles.root}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -156,16 +131,10 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Developer</Text>
+          <Text style={styles.sectionTitle}>Security</Text>
           <SettingRow
-            title="Force Expire Session (next launch)"
-            description="Marks session expired. Sign-in required on relaunch."
-            onPress={handleExpireOnNextLaunch}
-            color="#FF9500"
-          />
-          <SettingRow
-            title="Force Expire Session Now"
-            description="Signs out immediately."
+            title="Sign Out & Lock"
+            description="Clears local keys. PIN required on next sign-in."
             onPress={handleExpireNow}
             color="#FF3B30"
           />

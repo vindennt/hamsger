@@ -98,8 +98,7 @@ export function SessionManager() {
           .getState()
           .initData(resolvedContacts, newIdentities, initialSessions, peer);
       } catch (err: any) {
-        console.error("Failed to init session manager:", err);
-        // TODO: Make more verbose with solutions or contact screen
+        console.error("[SessionManager] init failed:", err);
         if (err?.message?.includes("Check your connection")) {
           Alert.alert(
             "Connection Error",
@@ -137,7 +136,6 @@ export function SessionManager() {
             row &&
             (row.to_user_id === user.id || row.from_user_id === user.id)
           ) {
-            console.log("[Supabase Realtime] Friend request update detected");
             fetchPendingRequests(user.id).then((data) => {
               setPendingRequests(data || []);
             });
@@ -335,7 +333,6 @@ export function SessionManager() {
           if (newRow && newRow.payload) {
             if (newRow.recipient_id !== user.id) return;
 
-            console.log("[Supabase Realtime] Received new message:", newRow.id);
             const newMsg = newRow.payload as EncryptedDbMessage;
             await decryptAndAddMessage(newMsg.conversation_id, newMsg);
 
@@ -343,12 +340,9 @@ export function SessionManager() {
           }
         },
       )
-      .subscribe((status) => {
-        console.log(`[Supabase Realtime] Subscription status:`, status);
-      });
+      .subscribe();
 
     return () => {
-      console.log(`[Supabase Realtime] Removing channel`, channelName);
       supabase.removeChannel(subscription);
     };
   }, [user, isReady, decryptAndAddMessage]);

@@ -266,7 +266,6 @@ export async function decryptKeyBundleWithMnemonic(
 }
 
 // Cloud persistence
-// TODO: validate security
 
 export async function saveBackupToCloud(
   userId: string,

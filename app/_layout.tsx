@@ -43,7 +43,6 @@ function RootLayoutNav() {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === "(auth)";
-    // TODO: DOnt hardcode this fucking screen later
     const isPostAuthScreen =
       segments[1] === "setup-pin" || segments[1] === "restore-keys";
 

@@ -281,7 +281,6 @@ const local = StyleSheet.create({
     paddingTop: 12,
     fontSize: 17,
     color: "#000",
-    textAlignVertical: "top",
   },
   resetLink: {
     textAlign: "center",

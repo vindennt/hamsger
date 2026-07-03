@@ -24,6 +24,3 @@ export async function forceExpireSession(): Promise<void> {
   await kv.remove(LAST_ACTIVE_KEY);
 }
 
-export async function setForceExpireOnNextLaunch(): Promise<void> {
-  await kv.set(LAST_ACTIVE_KEY, "0");
-}
