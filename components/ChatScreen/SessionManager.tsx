@@ -165,9 +165,8 @@ export function SessionManager() {
       const session = sessions[convId];
       if (!session) {
         console.warn(
-          `[SessionManager] No session found for conversation ${convId}`,
+          `[SessionManager] No session for ${convId}: message dropped, will be fetched from queue on next load`,
         );
-        addMessage(convId, msg);
         return;
       }
 

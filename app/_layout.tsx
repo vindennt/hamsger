@@ -27,6 +27,7 @@ import {
   recordActivity,
 } from "@/lib/session/sessionExpiry";
 import { supabase } from "@/lib/supabase";
+import { useChatStore } from "@/lib/store/useChatStore";
 
 export const unstable_settings = {
   anchor: "(tabs)",
@@ -47,6 +48,7 @@ function RootLayoutNav() {
       segments[1] === "setup-pin" || segments[1] === "restore-keys";
 
     if (!session && !inAuthGroup) {
+      useChatStore.getState().reset();
       router.replace("/(auth)/sign-in");
     } else if (session && inAuthGroup && !isPostAuthScreen) {
       setIsSyncingProfile(true);

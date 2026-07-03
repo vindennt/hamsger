@@ -57,6 +57,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     identities,
     sessions,
     currentPeer: peer,
+    messagesDB: {},
     isReady: true,
   }),
 
