@@ -31,7 +31,6 @@ export const styles = StyleSheet.create({
           shadowOffset: { width: 0, height: 1 },
           shadowRadius: 3,
         }),
-    elevation: 1,
     gap: 20,
     width: "100%",
     maxWidth: 380,

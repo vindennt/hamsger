@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/context/auth";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
+import { Alert } from "react-native";
 import {
   acceptFriendRequest,
   fetchPendingRequests,
@@ -7,17 +9,21 @@ import {
   sendFriendRequest,
 } from "../../lib/contacts";
 import { verifyUserKeysExist } from "../../lib/crypto";
-import { supabase } from "../../lib/supabase";
-import { loadContactsAndSessions } from "./sessionHelpers";
-import { useChatStore } from "../../lib/store/useChatStore";
-import { messageRepo } from "../../lib/database/messageRepository";
-import { EncryptedDbMessage, UserIdentity } from "./types";
-import { getOrCreateRatchetState, serializeRatchetState } from "./ratchetHelpers";
 import { ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
+import { messageRepo } from "../../lib/database/messageRepository";
+import { useChatStore } from "../../lib/store/useChatStore";
+import { supabase } from "../../lib/supabase";
+import {
+  getOrCreateRatchetState,
+  serializeRatchetState,
+} from "./ratchetHelpers";
+import { loadContactsAndSessions } from "./sessionHelpers";
+import { EncryptedDbMessage, UserIdentity } from "./types";
 
 export function SessionManager() {
   const { user } = useAuth();
+  const router = useRouter();
 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -37,10 +43,12 @@ export function SessionManager() {
   const currentUserId = useChatStore((s) => s.currentUserId);
   const currentPeer = useChatStore((s) => s.currentPeer);
   const identities = useChatStore((s) => s.identities);
-  
+
   const activeConversationId =
     isReady && currentPeer && identities[currentUser] && identities[currentPeer]
-      ? [identities[currentUser].uuid, identities[currentPeer].uuid].sort().join(":")
+      ? [identities[currentUser].uuid, identities[currentPeer].uuid]
+          .sort()
+          .join(":")
       : "";
 
   useEffect(() => {
@@ -64,21 +72,40 @@ export function SessionManager() {
           "unauthorized";
         const userId = user!.id;
 
-        const myIdentityKey = await verifyUserKeysExist(userId, username);
+        const result = await verifyUserKeysExist(userId, username);
+
+        if (result.needsPinSetup) {
+          router.replace("/(auth)/setup-pin");
+          return;
+        }
+        if (result.needsRestore) {
+          router.replace("/(auth)/restore-keys");
+          return;
+        }
 
         const myIdentity: UserIdentity = {
           name: username,
           uuid: userId,
-          publicKey: myIdentityKey,
+          publicKey: result.identityKey,
         };
 
         const { resolvedContacts, newIdentities, initialSessions } =
           await loadContactsAndSessions(userId, myIdentity);
 
-        const peer = resolvedContacts.length > 0 ? resolvedContacts[0].name : "";
-        useChatStore.getState().initData(resolvedContacts, newIdentities, initialSessions, peer);
-      } catch (err) {
-        console.error("Failed to init session manager:", err);
+        const peer =
+          resolvedContacts.length > 0 ? resolvedContacts[0].name : "";
+        useChatStore
+          .getState()
+          .initData(resolvedContacts, newIdentities, initialSessions, peer);
+      } catch (err: any) {
+        console.error("[SessionManager] init failed:", err);
+        if (err?.message?.includes("Check your connection")) {
+          Alert.alert(
+            "Connection Error",
+            "Could not reach the server. Please check your internet connection and try again.",
+            [{ text: "OK" }],
+          );
+        }
         setIsReady(true);
       }
     }
@@ -109,7 +136,6 @@ export function SessionManager() {
             row &&
             (row.to_user_id === user.id || row.from_user_id === user.id)
           ) {
-            console.log("[Supabase Realtime] Friend request update detected");
             fetchPendingRequests(user.id).then((data) => {
               setPendingRequests(data || []);
             });
@@ -138,13 +164,20 @@ export function SessionManager() {
       const sessions = useChatStore.getState().sessions;
       const session = sessions[convId];
       if (!session) {
-        console.warn(`[SessionManager] No session found for conversation ${convId}`);
+        console.warn(
+          `[SessionManager] No session found for conversation ${convId}`,
+        );
         addMessage(convId, msg);
         return;
       }
 
       try {
-        const state = await getOrCreateRatchetState(convId, session, currentUserId, currentUser);
+        const state = await getOrCreateRatchetState(
+          convId,
+          session,
+          currentUserId,
+          currentUser,
+        );
         const ratchetMsg = {
           header: { DHpub: msg.dh_pub, PN: msg.pn, N: msg.n },
           ciphertext: msg.ciphertext,
@@ -267,10 +300,16 @@ export function SessionManager() {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
             await decryptAndAddMessage(payload.conversation_id, payload);
+            try {
+              await supabase.from("message_queue").delete().eq("id", row.id);
+            } catch (deleteErr) {
+              console.warn(
+                "[SessionManager] Failed to delete queue row:",
+                row.id,
+                deleteErr,
+              );
+            }
           }
-
-          const idsToDelete = data.map((row) => row.id);
-          await supabase.from("message_queue").delete().in("id", idsToDelete);
         }
       } catch (err) {
         console.error("Error fetching initial messages:", err);
@@ -294,7 +333,6 @@ export function SessionManager() {
           if (newRow && newRow.payload) {
             if (newRow.recipient_id !== user.id) return;
 
-            console.log("[Supabase Realtime] Received new message:", newRow.id);
             const newMsg = newRow.payload as EncryptedDbMessage;
             await decryptAndAddMessage(newMsg.conversation_id, newMsg);
 
@@ -302,12 +340,9 @@ export function SessionManager() {
           }
         },
       )
-      .subscribe((status) => {
-        console.log(`[Supabase Realtime] Subscription status:`, status);
-      });
+      .subscribe();
 
     return () => {
-      console.log(`[Supabase Realtime] Removing channel`, channelName);
       supabase.removeChannel(subscription);
     };
   }, [user, isReady, decryptAndAddMessage]);
@@ -320,11 +355,19 @@ export async function handleAddContact(
   currentUser: string,
   friendUsername: string,
 ) {
-  const res = await sendFriendRequest(currentUserId, currentUser, friendUsername);
+  const res = await sendFriendRequest(
+    currentUserId,
+    currentUser,
+    friendUsername,
+  );
   return res;
 }
 
-export async function handleAcceptRequest(requestId: string, currentUserId: string, fromUserId: string) {
+export async function handleAcceptRequest(
+  requestId: string,
+  currentUserId: string,
+  fromUserId: string,
+) {
   const res = await acceptFriendRequest(requestId, currentUserId, fromUserId);
   return res;
 }
