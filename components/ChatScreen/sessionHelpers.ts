@@ -53,8 +53,11 @@ export async function loadContactsAndSessions(
         .eq("user_id", friendId)
         .maybeSingle();
 
-      const friendPubKey =
-        friendBundle?.identity_key || "fallback_pub_" + friendId;
+      // TODO: Diagnose this bug more where sometimes identiy key is not found and suddenly all chat log is "failed to send. For now, recognize it"
+      if (!friendBundle?.identity_key) {
+        throw new Error(`Missing encryption keys for ${friendName}.`);
+      }
+      const friendPubKey = friendBundle.identity_key;
 
       const friendIdentity: UserIdentity = {
         name: friendName,

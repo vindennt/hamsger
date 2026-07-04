@@ -117,6 +117,9 @@ export function SessionManager() {
             "Could not reach the server. Please check your internet connection and try again.",
             [{ text: "OK" }],
           );
+          // TODO: Log this error more in future
+        } else if (err?.message?.includes("Missing encryption keys")) {
+          Alert.alert("Setup Error", err.message, [{ text: "OK" }]);
         }
         setIsReady(true);
       }
