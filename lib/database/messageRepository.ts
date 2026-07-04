@@ -36,6 +36,14 @@ export function setMessageDb(database: SQLiteDatabase): void {
 }
 
 export const messageRepo = {
+  async messageExists(id: string): Promise<boolean> {
+    const row = await getDb().getFirstAsync<{ id: string }>(
+      "SELECT id FROM messages WHERE id = ? LIMIT 1",
+      [id],
+    );
+    return row !== null;
+  },
+
   async insertMessage(msg: MessageRow): Promise<void> {
     let encryptedPlaintext: string | null = null;
     if (msg.local_plaintext) {

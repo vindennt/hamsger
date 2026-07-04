@@ -298,7 +298,10 @@ export function SessionManager() {
         if (data && data.length > 0) {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
-            await decryptAndAddMessage(payload.conversation_id, payload);
+            const alreadyStored = await messageRepo.messageExists(payload.id);
+            if (!alreadyStored) {
+              await decryptAndAddMessage(payload.conversation_id, payload);
+            }
             try {
               await supabase.from("message_queue").delete().eq("id", row.id);
             } catch (deleteErr) {
@@ -333,9 +336,19 @@ export function SessionManager() {
             if (newRow.recipient_id !== user.id) return;
 
             const newMsg = newRow.payload as EncryptedDbMessage;
-            await decryptAndAddMessage(newMsg.conversation_id, newMsg);
-
-            await supabase.from("message_queue").delete().eq("id", newRow.id);
+            const alreadyStored = await messageRepo.messageExists(newMsg.id);
+            if (!alreadyStored) {
+              await decryptAndAddMessage(newMsg.conversation_id, newMsg);
+            }
+            try {
+              await supabase.from("message_queue").delete().eq("id", newRow.id);
+            } catch (deleteErr) {
+              console.warn(
+                "[SessionManager] Failed to delete queue row:",
+                newRow.id,
+                deleteErr,
+              );
+            }
           }
         },
       )
