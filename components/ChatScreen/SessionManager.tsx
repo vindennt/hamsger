@@ -1,6 +1,6 @@
 import { useAuth } from "@/context/auth";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 import {
   acceptFriendRequest,
@@ -30,10 +30,6 @@ export function SessionManager() {
   // Zustand Actions
   const setIsReady = useChatStore((s) => s.setIsReady);
   const setCurrentUser = useChatStore((s) => s.setCurrentUser);
-  const setCurrentPeer = useChatStore((s) => s.setCurrentPeer);
-  const setContacts = useChatStore((s) => s.setContacts);
-  const setIdentities = useChatStore((s) => s.setIdentities);
-  const setSessions = useChatStore((s) => s.setSessions);
   const setPendingRequests = useChatStore((s) => s.setPendingRequests);
   const addMessage = useChatStore((s) => s.addMessage);
 
@@ -50,6 +46,22 @@ export function SessionManager() {
           .sort()
           .join(":")
       : "";
+
+  // Separates ratchet state so separate callers dont get mixed up
+  // Like mutex but for sequence
+  const ratchetLocks = useRef(new Map<string, Promise<void>>());
+  const withRatchetLock = useCallback(
+    <T,>(convId: string, fn: () => Promise<T>): Promise<T> => {
+      const prev = ratchetLocks.current.get(convId) ?? Promise.resolve();
+      let resolve!: () => void;
+      const gate = new Promise<void>((r) => {
+        resolve = r;
+      });
+      ratchetLocks.current.set(convId, gate);
+      return prev.then(fn).finally(resolve);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -300,7 +312,9 @@ export function SessionManager() {
             const payload = row.payload as EncryptedDbMessage;
             const alreadyStored = await messageRepo.messageExists(payload.id);
             if (!alreadyStored) {
-              await decryptAndAddMessage(payload.conversation_id, payload);
+              await withRatchetLock(payload.conversation_id, () =>
+                decryptAndAddMessage(payload.conversation_id, payload),
+              );
             }
             try {
               await supabase.from("message_queue").delete().eq("id", row.id);
@@ -338,7 +352,9 @@ export function SessionManager() {
             const newMsg = newRow.payload as EncryptedDbMessage;
             const alreadyStored = await messageRepo.messageExists(newMsg.id);
             if (!alreadyStored) {
-              await decryptAndAddMessage(newMsg.conversation_id, newMsg);
+              await withRatchetLock(newMsg.conversation_id, () =>
+                decryptAndAddMessage(newMsg.conversation_id, newMsg),
+              );
             }
             try {
               await supabase.from("message_queue").delete().eq("id", newRow.id);
@@ -357,7 +373,7 @@ export function SessionManager() {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, decryptAndAddMessage]);
+  }, [user, isReady, decryptAndAddMessage, withRatchetLock]);
 
   return null; // Headless component
 }
