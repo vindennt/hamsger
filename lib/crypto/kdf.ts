@@ -39,7 +39,7 @@ export function __setArgon2ParamsForTests(params: Argon2Params): void {
 export function __resetArgon2Params(): void {
   activeParams = DEFAULT_ARGON2_PARAMS;
 }
-{userId
+
 const enc = new TextEncoder();
 const subtle = globalThis.crypto?.subtle;
 
@@ -50,7 +50,7 @@ export async function deriveWrappingKeyHex(
   domain: KdfDomain = "pin",
 ): Promise<string> {
   if (kdf === "argon2id") {
-    // Domain-separated salt: `$}:pin` vs `${userId}:mnemonic`.
+    // Domain-separated salt: `${userId}:pin` vs `${userId}:mnemonic`.
     const salt = enc.encode(`${userId}:${domain}`);
     const out = argon2id(enc.encode(secret), salt, {
       t: activeParams.t,
