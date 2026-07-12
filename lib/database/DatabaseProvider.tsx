@@ -2,6 +2,7 @@ import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import React from "react";
 import { Platform } from "react-native";
 import { migrateWebAtRestIfNeeded } from "../crypto/webAtRestMigration";
+import { setArchiveOutboxDb } from "./archiveOutboxRepository";
 import { setKvDb } from "./kv";
 import { setMessageDb } from "./messageRepository";
 import { setOutboxDb } from "./outboxRepository";
@@ -13,6 +14,7 @@ function DatabaseInitializer({ children }: { children: React.ReactNode }) {
   setKvDb(db);
   setMessageDb(db);
   setOutboxDb(db);
+  setArchiveOutboxDb(db);
 
   // On web, re-encrypt any legacy plaintext at rest BEFORE children mount and start
   // decrypting. Native has nothing to migrate, so it's ready immediately.

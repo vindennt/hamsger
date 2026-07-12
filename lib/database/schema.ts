@@ -4,7 +4,7 @@ import { type SQLiteDatabase } from "expo-sqlite";
  * Current schema version. Bump this and add a new migration step
  * function (e.g. `migrateV1ToV2`) whenever the schema changes.
  */
-const LATEST_VERSION = 4;
+const LATEST_VERSION = 5;
 
 // ---------------------------------------------------------------------------
 // Migration steps — one function per version bump
@@ -162,6 +162,45 @@ async function migrateV3ToV4(db: SQLiteDatabase): Promise<void> {
 }
 
 /**
+ * v4 → v5: Durable archive outbox.
+ *
+ * The hybrid cloud archive (docs/impl/p3-cloud-archive-hybrid.md) appends each
+ * message to `message_archive` on Supabase as a per-message encrypted row.
+ * Archiving must never block or fail the chat path, so it reuses the P2 durable
+ * outbox pattern: the ciphertext (already encrypted under the user's archive_key)
+ * is staged here and flushed to the cloud with retry/backoff. Rows are deleted
+ * once the server confirms the insert (durable history lives in `message_archive`).
+ */
+async function migrateV4ToV5(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`BEGIN TRANSACTION;`);
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS archive_outbox (
+        msg_id            TEXT PRIMARY KEY,
+        user_id           TEXT NOT NULL,
+        conversation_id   TEXT NOT NULL,
+        ciphertext        TEXT NOT NULL,
+        iv                TEXT NOT NULL,
+        auth_tag          TEXT NOT NULL,
+        created_at_server TEXT NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'pending',
+        attempts          INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at   TEXT,
+        created_at        TEXT NOT NULL
+      );
+    `);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_archive_outbox_status
+        ON archive_outbox(status, created_at);
+    `);
+    await db.execAsync(`COMMIT;`);
+  } catch (e) {
+    await db.execAsync(`ROLLBACK;`);
+    throw e;
+  }
+}
+
+/**
  * Ordered list of migration functions.
  * Index 0 = v0→v1, index 1 = v1→v2, etc.
  */
@@ -170,6 +209,7 @@ const MIGRATIONS: readonly ((db: SQLiteDatabase) => Promise<void>)[] = [
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
 ];
 
 // ---------------------------------------------------------------------------
