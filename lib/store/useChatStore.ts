@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { UserIdentity, SessionContext, ConversationId, EncryptedDbMessage } from '../../components/ChatScreen/types';
+import { UserIdentity, SessionContext, ConversationId, EncryptedDbMessage, SendStatus } from '../../components/ChatScreen/types';
 
 interface ChatState {
   isReady: boolean;
@@ -23,6 +23,7 @@ interface ChatState {
   // High-performance message appending
   addMessage: (convId: ConversationId, msg: EncryptedDbMessage) => void;
   setMessages: (convId: ConversationId, messages: EncryptedDbMessage[]) => void;
+  updateMessageStatus: (convId: ConversationId, msgId: string, status: SendStatus) => void;
 
   initData: (contacts: UserIdentity[], identities: Record<string, UserIdentity>, sessions: Record<string, SessionContext>, peer: string) => void;
 
@@ -82,6 +83,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ),
     }
   })),
+
+  updateMessageStatus: (convId, msgId, status) => set((state) => {
+    const existing = state.messagesDB[convId];
+    if (!existing) return state;
+    let changed = false;
+    const next = existing.map((m) => {
+      if (m.id === msgId && m.send_status !== status) {
+        changed = true;
+        return { ...m, send_status: status };
+      }
+      return m;
+    });
+    if (!changed) return state;
+    return { messagesDB: { ...state.messagesDB, [convId]: next } };
+  }),
 
   setPendingRequests: (pendingRequests) => set({ pendingRequests }),
 
