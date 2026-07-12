@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 import { migrateWebAtRestIfNeeded } from "../crypto/webAtRestMigration";
 import { setKvDb } from "./kv";
 import { setMessageDb } from "./messageRepository";
+import { setOutboxDb } from "./outboxRepository";
 import { migrateDbIfNeeded } from "./schema";
 
 function DatabaseInitializer({ children }: { children: React.ReactNode }) {
@@ -11,6 +12,7 @@ function DatabaseInitializer({ children }: { children: React.ReactNode }) {
 
   setKvDb(db);
   setMessageDb(db);
+  setOutboxDb(db);
 
   // On web, re-encrypt any legacy plaintext at rest BEFORE children mount and start
   // decrypting. Native has nothing to migrate, so it's ready immediately.
