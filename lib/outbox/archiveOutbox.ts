@@ -69,17 +69,19 @@ async function deliverBatch(rows: ArchiveOutboxRow[]): Promise<boolean> {
 let flushing = false;
 let flushQueued = false;
 
-async function flushOnce(): Promise<void> {
+/** Deliver one due batch. Returns true if a batch landed (rows dropped). */
+async function flushOnce(): Promise<boolean> {
   const now = Date.now();
   const pending = await archiveOutboxRepo.getPending(BATCH_SIZE);
   const due = pending.filter((r) => isDue(r, now));
-  if (due.length === 0) return;
-  await deliverBatch(due);
+  if (due.length === 0) return false;
+  return deliverBatch(due);
 }
 
 /**
  * Flush staged archive rows. Fire-and-forget from the chat path; also called on
- * boot and after backfill. Safe to call concurrently.
+ * boot, after backfill, and on the useOutbox triggers (foreground / reconnect /
+ * timer). Safe to call concurrently.
  */
 export async function flushArchiveOutbox(): Promise<void> {
   if (flushing) {
@@ -90,14 +92,10 @@ export async function flushArchiveOutbox(): Promise<void> {
   try {
     do {
       flushQueued = false;
-      // Drain as long as a batch lands and more rows remain.
-      let landed = true;
-      while (landed) {
-        const before = await archiveOutboxRepo.countPending();
-        if (before === 0) break;
-        await flushOnce();
-        const after = await archiveOutboxRepo.countPending();
-        landed = after < before;
+      // Drain while batches keep landing; stop on empty, all-backed-off, or a
+      // retryable failure (those rows retry on the next flush trigger).
+      while (await flushOnce()) {
+        /* keep draining */
       }
     } while (flushQueued);
   } catch (e) {
