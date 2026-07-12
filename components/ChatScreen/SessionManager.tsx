@@ -19,7 +19,7 @@ import {
   serializeRatchetState,
 } from "./ratchetHelpers";
 import { loadContactsAndSessions } from "./sessionHelpers";
-import { EncryptedDbMessage, UserIdentity } from "./types";
+import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
 
 export function SessionManager() {
   const { user } = useAuth();
@@ -170,11 +170,30 @@ export function SessionManager() {
   }, [user, refreshTrigger, setPendingRequests, setIsReady]);
 
   const decryptAndAddMessage = useCallback(
-    async (convId: string, msg: EncryptedDbMessage) => {
+    async (convId: string, msg: EncryptedDbMessage, authSenderId: string) => {
       if ((msg as any).isDecrypted) {
         addMessage(convId, msg);
         return;
       }
+
+      // Trust the authenticated sender_id (RLS), never the
+      // attacker payload.sender string. Resolve the display name
+      // from the identity map by UUID and confirm the sender is the other
+      // participant of this conversation. Drop anything else
+      const identities = useChatStore.getState().identities;
+      const trustedIdentity = Object.values(identities).find(
+        (idn) => idn.uuid === authSenderId,
+      );
+      if (
+        !trustedIdentity ||
+        convId !== makeConversationId(currentUserId, authSenderId)
+      ) {
+        console.warn(
+          `[SessionManager] Dropping message ${msg.id}: sender ${authSenderId} is not a known participant of ${convId}`,
+        );
+        return;
+      }
+      const trustedSender = trustedIdentity.name;
 
       const sessions = useChatStore.getState().sessions;
       const session = sessions[convId];
@@ -213,7 +232,7 @@ export function SessionManager() {
           await messageRepo.insertMessage({
             id: msg.id,
             conversation_id: convId,
-            sender_id: msg.sender,
+            sender_id: trustedSender,
             recipient_id: currentUserId,
             created_at_server: msg.timestamp,
             timestamp: new Date().toISOString(),
@@ -228,6 +247,7 @@ export function SessionManager() {
 
         const decryptedMsg = {
           ...msg,
+          sender: trustedSender,
           text: plaintext,
           isDecrypted: true,
         };
@@ -255,6 +275,7 @@ export function SessionManager() {
 
         const failedMsg = {
           ...msg,
+          sender: trustedSender,
           text: "[Message failed to load]",
           isDecrypted: true,
         };
@@ -313,10 +334,11 @@ export function SessionManager() {
         if (data && data.length > 0) {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
+            const convId = makeConversationId(user.id, row.sender_id);
             const alreadyStored = await messageRepo.messageExists(payload.id);
             if (!alreadyStored) {
-              await withRatchetLock(payload.conversation_id, () =>
-                decryptAndAddMessage(payload.conversation_id, payload),
+              await withRatchetLock(convId, () =>
+                decryptAndAddMessage(convId, payload, row.sender_id),
               );
             }
             try {
@@ -353,10 +375,11 @@ export function SessionManager() {
             if (newRow.recipient_id !== user.id) return;
 
             const newMsg = newRow.payload as EncryptedDbMessage;
+            const convId = makeConversationId(user.id, newRow.sender_id);
             const alreadyStored = await messageRepo.messageExists(newMsg.id);
             if (!alreadyStored) {
-              await withRatchetLock(newMsg.conversation_id, () =>
-                decryptAndAddMessage(newMsg.conversation_id, newMsg),
+              await withRatchetLock(convId, () =>
+                decryptAndAddMessage(convId, newMsg, newRow.sender_id),
               );
             }
             try {
