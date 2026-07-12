@@ -3,11 +3,9 @@ import { kv } from "../database/kv";
 import { messageRepo, type MessageRow } from "../database/messageRepository";
 import { supabase } from "../supabase";
 import { BIP39_WORDLIST } from "./bip39Words";
+import { deriveWrappingKeyHex, type KdfId } from "./kdf";
 import { loadEncryptedState, saveEncryptedState } from "./secureStore";
 import { toHex, X3DH } from "./x3dh";
-
-// Web Crypto subtle
-const subtle = globalThis.crypto?.subtle;
 
 function getRandomBytes(n: number): Uint8Array {
   const buf = new Uint8Array(n);
@@ -63,32 +61,7 @@ export function mnemonicToSeed(mnemonic: string): string {
   return toHex(entropy);
 }
 
-// PBKDF2 key derivation
-
-async function deriveWrappingKeyHex(
-  secret: string,
-  userId: string,
-): Promise<string> {
-  const enc = new TextEncoder();
-  const keyMaterial = await subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  const bits = await subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt: enc.encode(userId),
-      iterations: 100_000,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    256,
-  );
-  return toHex(new Uint8Array(bits));
-}
+// Key derivation lives in ./kdf (Argon2id for new backups, PBKDF2 decrypt-only).
 
 // Payload shape
 
@@ -102,6 +75,8 @@ export interface BackupPayload {
   wrapped_key_mnemonic: string;
   iv_mnemonic: string;
   auth_tag_mnemonic: string;
+  // KDF version tag. Absent/undefined = legacy PBKDF2 (pre-Argon2id backups).
+  kdf?: KdfId;
 }
 
 // Key bundle export / import
@@ -181,10 +156,16 @@ export async function encryptKeyBundle(
 
   const bundleEnc = await X3DH.encrypt(kBackupHex, bundle);
 
-  const kPinHex = await deriveWrappingKeyHex(pin, userId);
+  // New backups derive both wraps with Argon2id and domain-separated salts.
+  const kPinHex = await deriveWrappingKeyHex(pin, userId, "argon2id", "pin");
   const pinEnc = await X3DH.encrypt(kPinHex, kBackupHex);
 
-  const kMnemonicHex = await deriveWrappingKeyHex(mnemonicSeedHex, userId);
+  const kMnemonicHex = await deriveWrappingKeyHex(
+    mnemonicSeedHex,
+    userId,
+    "argon2id",
+    "mnemonic",
+  );
   const mnemonicEnc = await X3DH.encrypt(kMnemonicHex, kBackupHex);
 
   return {
@@ -197,19 +178,28 @@ export async function encryptKeyBundle(
     wrapped_key_mnemonic: mnemonicEnc.ciphertext,
     iv_mnemonic: mnemonicEnc.iv,
     auth_tag_mnemonic: mnemonicEnc.authTag,
+    kdf: "argon2id",
   };
 }
 
 // Re-encrypts a new bundle with the existing K_backup (recovered via PIN),
 // so wrapped_key_pin and wrapped_key_mnemonic remain valid without the user
 // needing to re-enter their mnemonic.
+//
+// KDF note: refresh only has the PIN, not the mnemonic seed, so it CANNOT re-wrap
+// both keys — it therefore preserves `existing.kdf` (spread below) rather than
+// stamping "argon2id". A legacy PBKDF2 backup stays PBKDF2 through refresh; a full
+// upgrade to Argon2id requires BOTH secrets and so happens only on a fresh PIN setup
+// (encryptKeyBundle), which re-derives both wraps. (This deviates from the p1b draft's
+// "stamp argon2id on refresh" note, which would corrupt the still-PBKDF2 mnemonic wrap.)
 export async function refreshBackupBundle(
   existing: BackupPayload,
   newBundle: string,
   pin: string,
   userId: string,
 ): Promise<BackupPayload> {
-  const kPinHex = await deriveWrappingKeyHex(pin, userId);
+  const kdf: KdfId = existing.kdf ?? "pbkdf2";
+  const kPinHex = await deriveWrappingKeyHex(pin, userId, kdf, "pin");
   const kBackupHex = await X3DH.decrypt(
     kPinHex,
     existing.wrapped_key_pin,
@@ -230,7 +220,8 @@ export async function decryptKeyBundleWithPIN(
   pin: string,
   userId: string,
 ): Promise<string> {
-  const kPinHex = await deriveWrappingKeyHex(pin, userId);
+  const kdf: KdfId = payload.kdf ?? "pbkdf2";
+  const kPinHex = await deriveWrappingKeyHex(pin, userId, kdf, "pin");
   const kBackupHex = await X3DH.decrypt(
     kPinHex,
     payload.wrapped_key_pin,
@@ -250,7 +241,13 @@ export async function decryptKeyBundleWithMnemonic(
   seedHex: string,
   userId: string,
 ): Promise<string> {
-  const kMnemonicHex = await deriveWrappingKeyHex(seedHex, userId);
+  const kdf: KdfId = payload.kdf ?? "pbkdf2";
+  const kMnemonicHex = await deriveWrappingKeyHex(
+    seedHex,
+    userId,
+    kdf,
+    "mnemonic",
+  );
   const kBackupHex = await X3DH.decrypt(
     kMnemonicHex,
     payload.wrapped_key_mnemonic,
