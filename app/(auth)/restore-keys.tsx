@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { fieldStyles, styles as authStyles } from "../../components/styles/auth.styles";
 import { useAuth } from "../../context/auth";
+import { restoreArchive } from "../../lib/crypto/messageArchive";
 import { resetUserKeys } from "../../lib/crypto/onboarding";
 import {
   BackupPayload,
@@ -56,6 +57,11 @@ export default function RestoreKeysScreen() {
     try {
       const bundle = await decryptKeyBundleWithPIN(backup, pin, user.id);
       await importKeyBundle(bundle);
+      // Pull full history back from the incremental cloud archive (identity keys
+      // came from the blob above). Never fatal to a successful key restore.
+      await restoreArchive(user.id).catch((e) =>
+        console.error("[RestoreKeys] Archive restore failed:", e),
+      );
       router.replace("/(tabs)");
     } catch {
       const next = pinAttempts + 1;
@@ -78,6 +84,9 @@ export default function RestoreKeysScreen() {
       const seedHex = mnemonicToSeed(mnemonicInput.trim());
       const bundle = await decryptKeyBundleWithMnemonic(backup, seedHex, user.id);
       await importKeyBundle(bundle);
+      await restoreArchive(user.id).catch((e) =>
+        console.error("[RestoreKeys] Archive restore failed:", e),
+      );
       router.replace("/(tabs)");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to restore with recovery phrase");

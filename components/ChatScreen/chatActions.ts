@@ -9,6 +9,7 @@ import {
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { ratchetEncrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
+import { archiveMessage, type ArchiveInput } from "../../lib/crypto/messageArchive";
 import { flushOutbox } from "../../lib/outbox/outbox";
 
 export async function sendMessage(inputText: string) {
@@ -38,6 +39,10 @@ export async function sendMessage(inputText: string) {
   }
 
   const text = inputText.trim();
+
+  // Captured inside the ratchet lock (needs the generated msg id), archived
+  // outside it so cloud archiving never blocks the next encrypt.
+  let archiveInput: ArchiveInput | null = null;
 
   // Serialize the ratchet encrypt + state-save + enqueue per conversation so
   // concurrent sends get a monotonically increasing counter `n` (fixes the
@@ -119,6 +124,15 @@ export async function sendMessage(inputText: string) {
     } as any;
 
     addMessage(activeConversationId, localDbMsg);
+
+    archiveInput = {
+      msg_id: serverDbMsg.id,
+      conversation_id: activeConversationId,
+      sender_id: currentUser,
+      recipient_id: recipientIdentity.uuid,
+      text,
+      created_at_server: serverDbMsg.timestamp,
+    };
     return true;
   });
 
@@ -126,5 +140,11 @@ export async function sendMessage(inputText: string) {
   // The flusher delivers pending rows per-conversation in order.
   if (enqueued) {
     flushOutbox();
+    // Fire-and-forget: stage this message into the durable cloud archive.
+    if (archiveInput) {
+      archiveMessage(currentUserId, archiveInput).catch((e) =>
+        console.error("Failed to archive sent message:", e),
+      );
+    }
   }
 }

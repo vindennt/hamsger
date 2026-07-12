@@ -16,6 +16,7 @@ import {
   fieldStyles,
 } from "../../components/styles/auth.styles";
 import { useAuth } from "../../context/auth";
+import { ensureArchiveKey } from "../../lib/crypto/messageArchive";
 import {
   encryptKeyBundle,
   exportKeyBundle,
@@ -65,6 +66,10 @@ export default function SetupPinScreen() {
 
     setLoading(true);
     try {
+      // Generate the archive key BEFORE export so it's captured in this first
+      // backup blob — otherwise archive rows written before the next refresh
+      // would be unrecoverable on a fresh restore.
+      await ensureArchiveKey(user.id);
       const bundle = await exportKeyBundle(user.id);
       const payload = await encryptKeyBundle(bundle, pin, seedHex, user.id);
       await saveBackupToCloud(user.id, payload);

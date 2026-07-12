@@ -1,6 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { kv } from "../database/kv";
-import { messageRepo, type MessageRow } from "../database/messageRepository";
 import { supabase } from "../supabase";
 import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
@@ -89,6 +88,10 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     `spk_pub_${userId}`,
     `sig_priv_${userId}`,
     `sig_pub_${userId}`,
+    // Long-lived key that decrypts the incremental cloud archive. It MUST ride
+    // inside this Argon2id-wrapped blob so restore recovers the whole archive
+    // (docs/impl/p3-cloud-archive-hybrid.md).
+    `archive_key_${userId}`,
   ];
 
   const keyEntries: Record<string, string> = {};
@@ -109,18 +112,16 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     if (plaintext) ratchetStates[key] = plaintext;
   }
 
-  // Messages are stored encrypted with the device master key; export as
-  // plaintext so they can be re-encrypted on the restore device.
-  const messageHistory = await messageRepo.getAllMessagesDecrypted();
-
-  return JSON.stringify({ keyEntries, ratchetStates, messageHistory });
+  // Message history now lives in the incremental cloud archive (message_archive),
+  // NOT in this blob — so the blob stays small and bounded as history grows and
+  // #8 auto-refresh only re-uploads KB.
+  return JSON.stringify({ keyEntries, ratchetStates });
 }
 
 export async function importKeyBundle(bundle: string): Promise<void> {
-  const { keyEntries, ratchetStates, messageHistory } = JSON.parse(bundle) as {
+  const { keyEntries, ratchetStates } = JSON.parse(bundle) as {
     keyEntries: Record<string, string>;
     ratchetStates: Record<string, string>;
-    messageHistory?: MessageRow[];
   };
 
   for (const [key, value] of Object.entries(keyEntries)) {
@@ -135,13 +136,8 @@ export async function importKeyBundle(bundle: string): Promise<void> {
     if (!existing) await saveEncryptedState(key, plaintext);
   }
 
-  // Restore message history — insertMessage re-encrypts each row with
-  // this device's master key. INSERT OR IGNORE skips duplicates.
-  if (messageHistory) {
-    for (const msg of messageHistory) {
-      await messageRepo.insertMessage(msg);
-    }
-  }
+  // Message history is NOT in the blob: it's restored separately from the
+  // incremental cloud archive via restoreArchive (docs/impl/p3-cloud-archive-hybrid.md).
 }
 
 // Double-wrap encryption / decryption
