@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useChatStore } from "../../../lib/store/useChatStore";
+import { retrySend } from "../../../lib/outbox/outbox";
 import { useDecryption } from "../useDecryption";
 import { styles } from "../styles/index.web";
 
@@ -95,7 +96,21 @@ export function MessageList({ isMobile, setIsDrawerOpen }: MessageListProps) {
                       hour: "2-digit",
                       minute: "2-digit",
                     })}
+                    {isMe && msg.send_status === "pending" && " · Sending…"}
+                    {isMe && msg.send_status === "sent" && " · Sent"}
                   </Text>
+                  {isMe && msg.send_status === "failed" && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        retrySend(activeConversationId, msg.id)
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{ color: "#FF3B30", fontSize: 11, marginTop: 2 }}>
+                        Not delivered · Tap to retry
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
             );
