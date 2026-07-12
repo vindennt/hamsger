@@ -89,6 +89,10 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     `spk_pub_${userId}`,
     `sig_priv_${userId}`,
     `sig_pub_${userId}`,
+    // Long-lived key that decrypts the incremental cloud archive. It MUST ride
+    // inside this Argon2id-wrapped blob so restore recovers the whole archive
+    // (docs/impl/p3-cloud-archive-hybrid.md).
+    `archive_key_${userId}`,
   ];
 
   const keyEntries: Record<string, string> = {};
@@ -109,11 +113,11 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     if (plaintext) ratchetStates[key] = plaintext;
   }
 
-  // Messages are stored encrypted with the device master key; export as
-  // plaintext so they can be re-encrypted on the restore device.
-  const messageHistory = await messageRepo.getAllMessagesDecrypted();
-
-  return JSON.stringify({ keyEntries, ratchetStates, messageHistory });
+  // Message history now lives in the incremental cloud archive (message_archive),
+  // NOT in this blob — so the blob stays small and bounded as history grows and
+  // #8 auto-refresh only re-uploads KB. importKeyBundle stays tolerant of a legacy
+  // `messageHistory` field so pre-archive backups still restore their history.
+  return JSON.stringify({ keyEntries, ratchetStates });
 }
 
 export async function importKeyBundle(bundle: string): Promise<void> {
@@ -135,8 +139,11 @@ export async function importKeyBundle(bundle: string): Promise<void> {
     if (!existing) await saveEncryptedState(key, plaintext);
   }
 
-  // Restore message history — insertMessage re-encrypts each row with
-  // this device's master key. INSERT OR IGNORE skips duplicates.
+  // Legacy path: pre-archive backups embedded messageHistory in the blob. New
+  // exports omit it (history comes from message_archive via restoreArchive), but
+  // keep importing it when present so old backups still restore their history.
+  // insertMessage re-encrypts each row with this device's master key; INSERT OR
+  // IGNORE skips duplicates (e.g. rows also present in the archive).
   if (messageHistory) {
     for (const msg of messageHistory) {
       await messageRepo.insertMessage(msg);
