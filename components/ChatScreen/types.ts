@@ -16,11 +16,16 @@ export function makeConversationId(
   return [uuid1, uuid2].sort().join(":");
 }
 
+// Delivery state for messages WE send (durable outbox, see lib/outbox).
+// Received messages leave this undefined.
+export type SendStatus = "pending" | "sent" | "failed";
+
 export interface Message {
   id: string;
   sender: User;
   text: string;
   timestamp: Date;
+  send_status?: SendStatus;
 }
 
 // Example DB schema
@@ -44,6 +49,9 @@ export interface EncryptedDbMessage {
 
   // UI convenience — same as ciphertext until decryption is implemented
   text: string;
+
+  // Delivery state for sent messages (undefined for received messages).
+  send_status?: SendStatus;
 }
 
 /**
@@ -57,6 +65,7 @@ export function toMessage(db: EncryptedDbMessage): Message {
     sender: db.sender,
     text: db.text, // raw ciphertext — swap for plaintext once decrypted
     timestamp: new Date(db.timestamp),
+    send_status: db.send_status,
   };
 }
 

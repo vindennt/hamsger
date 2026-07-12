@@ -1,6 +1,6 @@
 import { useAuth } from "@/context/auth";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert } from "react-native";
 import {
   acceptFriendRequest,
@@ -10,8 +10,10 @@ import {
 } from "../../lib/contacts";
 import { verifyUserKeysExist } from "../../lib/crypto";
 import { ratchetDecrypt } from "../../lib/crypto/ratchet";
+import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
+import { outboxRepo } from "../../lib/database/outboxRepository";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
 import {
@@ -20,6 +22,7 @@ import {
 } from "./ratchetHelpers";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
+import { useOutbox } from "./useOutbox";
 
 export function SessionManager() {
   const { user } = useAuth();
@@ -47,21 +50,11 @@ export function SessionManager() {
           .join(":")
       : "";
 
-  // Separates ratchet state so separate callers dont get mixed up
-  // Like mutex but for sequence
-  const ratchetLocks = useRef(new Map<string, Promise<void>>());
-  const withRatchetLock = useCallback(
-    <T,>(convId: string, fn: () => Promise<T>): Promise<T> => {
-      const prev = ratchetLocks.current.get(convId) ?? Promise.resolve();
-      let resolve!: () => void;
-      const gate = new Promise<void>((r) => {
-        resolve = r;
-      });
-      ratchetLocks.current.set(convId, gate);
-      return prev.then(fn).finally(resolve);
-    },
-    [],
-  );
+  // Ratchet serialization now lives in a shared module (lib/crypto/ratchetLock)
+  // so the send path and this receive path serialize against each other.
+
+  // Retry pending sends on foreground / reconnect / timer.
+  useOutbox(isReady);
 
   useEffect(() => {
     if (!user) return;
@@ -296,6 +289,9 @@ export function SessionManager() {
           30,
           0,
         );
+        // Undelivered sends keep their pending/failed indicator across restarts.
+        const outboxStatuses =
+          await outboxRepo.getStatusesByConversation(activeConversationId);
         // Map rows to UI messages
         for (const row of rows.reverse()) {
           const uiMsg: EncryptedDbMessage = {
@@ -306,6 +302,7 @@ export function SessionManager() {
             text:
               row.local_plaintext || "[Historical Message - Missing Plaintext]",
             isDecrypted: true,
+            send_status: outboxStatuses[row.id],
           } as any;
           addMessage(row.conversation_id, uiMsg);
         }
@@ -399,7 +396,7 @@ export function SessionManager() {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, decryptAndAddMessage, withRatchetLock]);
+  }, [user, isReady, decryptAndAddMessage]);
 
   return null; // Headless component
 }

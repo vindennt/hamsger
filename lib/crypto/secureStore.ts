@@ -1,9 +1,11 @@
 import { Platform } from "react-native";
 import { kv } from "../database/kv";
+import { getWebMasterKeyHex } from "./webMasterKey";
 import { X3DH } from "./x3dh";
 
-// Encrypts a plaintext string using a device's key before writing to the KV store
-// TODO: On web, plaintext local store. Can this be compromised?
+// Encrypts a plaintext string using a device's key before writing to the KV store.
+// Native: Keychain-backed key (expo-secure-store). Web: an IndexedDB-wrapped key
+// (see webMasterKey.ts) — both now yield a real hex key, so nothing is stored plaintext.
 
 // Lazy-load expo-secure-store only on native to avoid web bundling issues
 let SecureStore: typeof import("expo-secure-store") | null = null;
@@ -19,6 +21,11 @@ async function getSecureStoreModule() {
 const MASTER_KEY_ALIAS = "hamsger_ratchet_master_key_v1";
 
 export async function getMasterKey(): Promise<string | null> {
+  // Web: device-bound key wrapped by a non-extractable IndexedDB CryptoKey.
+  // Making this non-null on web flips saveEncryptedState/loadEncryptedState and
+  // messageRepository onto their encrypting branches automatically.
+  if (Platform.OS === "web") return getWebMasterKeyHex();
+
   const store = await getSecureStoreModule();
   if (!store) return null;
 

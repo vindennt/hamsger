@@ -4,7 +4,7 @@ import { type SQLiteDatabase } from "expo-sqlite";
  * Current schema version. Bump this and add a new migration step
  * function (e.g. `migrateV1ToV2`) whenever the schema changes.
  */
-const LATEST_VERSION = 3;
+const LATEST_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Migration steps — one function per version bump
@@ -126,6 +126,42 @@ async function migrateV2ToV3(db: SQLiteDatabase): Promise<void> {
 }
 
 /**
+ * v3 → v4: Durable send outbox.
+ *
+ * Sends were previously fire-and-forget: a failed `message_queue` insert was
+ * logged and dropped. The outbox persists the ENCRYPTED payload (ciphertext +
+ * ratchet header) verbatim until delivery so a retry never re-runs the ratchet
+ * (which would advance `n` and reorder). It's a dedicated table, not a status
+ * column on `messages`, because v3 dropped the ciphertext columns.
+ * See docs/impl/p2-reliability-outbox.md.
+ */
+async function migrateV3ToV4(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`BEGIN TRANSACTION;`);
+  try {
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS outbox (
+        msg_id          TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        sender_id       TEXT NOT NULL,
+        recipient_id    TEXT NOT NULL,
+        payload         TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at TEXT,
+        created_at      TEXT NOT NULL
+      );
+    `);
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, created_at);
+    `);
+    await db.execAsync(`COMMIT;`);
+  } catch (e) {
+    await db.execAsync(`ROLLBACK;`);
+    throw e;
+  }
+}
+
+/**
  * Ordered list of migration functions.
  * Index 0 = v0→v1, index 1 = v1→v2, etc.
  */
@@ -133,6 +169,7 @@ const MIGRATIONS: readonly ((db: SQLiteDatabase) => Promise<void>)[] = [
   migrateV0ToV1,
   migrateV1ToV2,
   migrateV2ToV3,
+  migrateV3ToV4,
 ];
 
 // ---------------------------------------------------------------------------
