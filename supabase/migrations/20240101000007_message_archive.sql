@@ -16,7 +16,7 @@
 
 create table if not exists public.message_archive (
   id                bigint generated always as identity primary key,
-  user_id           uuid not null references auth.users(id) on delete cascade,
+  user_id           uuid not null references public.profiles(id) on delete cascade,
   conversation_id   text not null,
   msg_id            text not null,            -- app message id, for dedupe
   ciphertext        text not null,            -- AES-256-GCM under archive_key
@@ -37,10 +37,17 @@ create index if not exists idx_archive_user_conv_time
 
 alter table public.message_archive enable row level security;
 
+-- drop-then-create so the migration is idempotent / re-runnable
+-- (CREATE POLICY has no IF NOT EXISTS).
+drop policy if exists "own archive select" on public.message_archive;
 create policy "own archive select" on public.message_archive
   for select using (auth.uid() = user_id);
+
+drop policy if exists "own archive insert" on public.message_archive;
 create policy "own archive insert" on public.message_archive
   for insert with check (auth.uid() = user_id);
+
+drop policy if exists "own archive delete" on public.message_archive;
 create policy "own archive delete" on public.message_archive
   for delete using (auth.uid() = user_id);
 
