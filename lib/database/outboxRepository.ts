@@ -89,4 +89,25 @@ export const outboxRepo = {
       `SELECT * FROM outbox WHERE status = 'pending' ORDER BY created_at ASC`,
     );
   },
+
+  /**
+   * Undelivered send statuses for a conversation, keyed by msg_id. Used on load
+   * so a message still in the outbox keeps its pending/failed indicator across
+   * app restarts (delivered messages are absent → they render with no indicator).
+   */
+  async getStatusesByConversation(
+    conversationId: string,
+  ): Promise<Record<string, "pending" | "failed">> {
+    const rows = await getDb().getAllAsync<{ msg_id: string; status: string }>(
+      `SELECT msg_id, status FROM outbox WHERE conversation_id = ?`,
+      [conversationId],
+    );
+    const map: Record<string, "pending" | "failed"> = {};
+    for (const r of rows) {
+      if (r.status === "pending" || r.status === "failed") {
+        map[r.msg_id] = r.status;
+      }
+    }
+    return map;
+  },
 };

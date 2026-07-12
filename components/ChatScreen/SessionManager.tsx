@@ -13,6 +13,7 @@ import { ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
+import { outboxRepo } from "../../lib/database/outboxRepository";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
 import {
@@ -288,6 +289,9 @@ export function SessionManager() {
           30,
           0,
         );
+        // Undelivered sends keep their pending/failed indicator across restarts.
+        const outboxStatuses =
+          await outboxRepo.getStatusesByConversation(activeConversationId);
         // Map rows to UI messages
         for (const row of rows.reverse()) {
           const uiMsg: EncryptedDbMessage = {
@@ -298,6 +302,7 @@ export function SessionManager() {
             text:
               row.local_plaintext || "[Historical Message - Missing Plaintext]",
             isDecrypted: true,
+            send_status: outboxStatuses[row.id],
           } as any;
           addMessage(row.conversation_id, uiMsg);
         }
