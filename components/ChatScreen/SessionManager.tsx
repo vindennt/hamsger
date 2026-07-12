@@ -9,6 +9,11 @@ import {
   sendFriendRequest,
 } from "../../lib/contacts";
 import { verifyUserKeysExist } from "../../lib/crypto";
+import {
+  archiveMessage,
+  backfillArchive,
+  ensureArchiveKey,
+} from "../../lib/crypto/messageArchive";
 import { ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
@@ -102,6 +107,18 @@ export function SessionManager() {
         useChatStore
           .getState()
           .initData(resolvedContacts, newIdentities, initialSessions, peer);
+
+        // Ensure the archive key exists (new keys are captured by the next
+        // backup) and one-time backfill any pre-archive local history. Both are
+        // fire-and-forget so they never block the chat UI.
+        ensureArchiveKey(userId)
+          .then(() => backfillArchive(userId))
+          .catch((archiveErr) =>
+            console.error(
+              "[SessionManager] Archive init/backfill failed:",
+              archiveErr,
+            ),
+          );
       } catch (err: any) {
         console.error("[SessionManager] init failed:", err);
         if (err?.message?.includes("Check your connection")) {
@@ -237,6 +254,21 @@ export function SessionManager() {
             dbErr,
           );
         }
+
+        // Fire-and-forget: stage this received message into the cloud archive.
+        archiveMessage(currentUserId, {
+          msg_id: msg.id,
+          conversation_id: convId,
+          sender_id: trustedSender,
+          recipient_id: currentUserId,
+          text: plaintext,
+          created_at_server: msg.timestamp,
+        }).catch((archiveErr) =>
+          console.error(
+            "[SessionManager] Failed to archive received message:",
+            archiveErr,
+          ),
+        );
 
         const decryptedMsg = {
           ...msg,

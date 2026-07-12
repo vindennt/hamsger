@@ -1,6 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { kv } from "../database/kv";
-import { messageRepo, type MessageRow } from "../database/messageRepository";
 import { supabase } from "../supabase";
 import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
@@ -115,16 +114,14 @@ export async function exportKeyBundle(userId: string): Promise<string> {
 
   // Message history now lives in the incremental cloud archive (message_archive),
   // NOT in this blob — so the blob stays small and bounded as history grows and
-  // #8 auto-refresh only re-uploads KB. importKeyBundle stays tolerant of a legacy
-  // `messageHistory` field so pre-archive backups still restore their history.
+  // #8 auto-refresh only re-uploads KB.
   return JSON.stringify({ keyEntries, ratchetStates });
 }
 
 export async function importKeyBundle(bundle: string): Promise<void> {
-  const { keyEntries, ratchetStates, messageHistory } = JSON.parse(bundle) as {
+  const { keyEntries, ratchetStates } = JSON.parse(bundle) as {
     keyEntries: Record<string, string>;
     ratchetStates: Record<string, string>;
-    messageHistory?: MessageRow[];
   };
 
   for (const [key, value] of Object.entries(keyEntries)) {
@@ -139,16 +136,8 @@ export async function importKeyBundle(bundle: string): Promise<void> {
     if (!existing) await saveEncryptedState(key, plaintext);
   }
 
-  // Legacy path: pre-archive backups embedded messageHistory in the blob. New
-  // exports omit it (history comes from message_archive via restoreArchive), but
-  // keep importing it when present so old backups still restore their history.
-  // insertMessage re-encrypts each row with this device's master key; INSERT OR
-  // IGNORE skips duplicates (e.g. rows also present in the archive).
-  if (messageHistory) {
-    for (const msg of messageHistory) {
-      await messageRepo.insertMessage(msg);
-    }
-  }
+  // Message history is NOT in the blob: it's restored separately from the
+  // incremental cloud archive via restoreArchive (docs/impl/p3-cloud-archive-hybrid.md).
 }
 
 // Double-wrap encryption / decryption

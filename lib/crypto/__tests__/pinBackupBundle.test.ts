@@ -1,12 +1,10 @@
 // Tests exportKeyBundle / importKeyBundle around the P3 hybrid-archive change:
-// the blob no longer carries messageHistory (it lives in message_archive) but
-// DOES carry the archive_key, and import stays tolerant of a legacy blob that
-// still embeds messageHistory. Storage/network are mocked; see
-// docs/impl/p3-cloud-archive-hybrid.md.
+// the blob no longer carries messageHistory (that lives in message_archive and
+// is restored via restoreArchive) but DOES carry the archive_key. Storage/network
+// are mocked; see docs/impl/p3-cloud-archive-hybrid.md.
 // jest hoists jest.mock() above imports, so captured vars must be `mock`-prefixed.
 const mockKvStore = new Map<string, string>();
 const mockEncryptedState = new Map<string, string>();
-const mockInsertedMessages: any[] = [];
 
 jest.mock("../../supabase", () => ({ supabase: {} }));
 
@@ -21,15 +19,6 @@ jest.mock("../../database/kv", () => ({
         .filter(([k]) => k.startsWith(prefix))
         .map(([key, value]) => ({ key, value })),
     ),
-  },
-}));
-
-jest.mock("../../database/messageRepository", () => ({
-  messageRepo: {
-    getAllMessagesDecrypted: jest.fn(async () => []),
-    insertMessage: jest.fn(async (m: any) => {
-      mockInsertedMessages.push(m);
-    }),
   },
 }));
 
@@ -51,7 +40,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockKvStore.clear();
   mockEncryptedState.clear();
-  mockInsertedMessages.length = 0;
 });
 
 describe("exportKeyBundle (slimmed for hybrid archive)", () => {
@@ -75,40 +63,36 @@ describe("exportKeyBundle (slimmed for hybrid archive)", () => {
   });
 });
 
-describe("importKeyBundle backward compatibility", () => {
-  it("restores keys and still re-inserts a legacy messageHistory", async () => {
-    const legacy = JSON.stringify({
-      keyEntries: { [`ik_priv_${USER}`]: "cafe" },
-      ratchetStates: {},
-      messageHistory: [
-        {
-          id: "m1",
-          conversation_id: "a:b",
-          sender_id: "alice",
-          recipient_id: USER,
-          created_at_server: "t1",
-          timestamp: "t1",
-          local_plaintext: "legacy hi",
-        },
-      ],
+describe("importKeyBundle", () => {
+  it("restores key entries and ratchet states from the blob", async () => {
+    const bundle = JSON.stringify({
+      keyEntries: {
+        [`ik_priv_${USER}`]: "cafe",
+        [`archive_key_${USER}`]: "b".repeat(64),
+      },
+      ratchetStates: { [`ratchetState_v3_${USER}_a:b`]: "ratchet-plain" },
     });
 
-    await importKeyBundle(legacy);
+    await importKeyBundle(bundle);
 
     expect(mockKvStore.get(`ik_priv_${USER}`)).toBe("cafe");
-    expect(mockInsertedMessages).toHaveLength(1);
-    expect(mockInsertedMessages[0]).toMatchObject({ id: "m1", local_plaintext: "legacy hi" });
+    expect(mockKvStore.get(`archive_key_${USER}`)).toBe("b".repeat(64));
+    expect(mockEncryptedState.get(`ratchetState_v3_${USER}_a:b`)).toBe(
+      "ratchet-plain",
+    );
   });
 
-  it("imports a new-style blob with no messageHistory without error", async () => {
-    const modern = JSON.stringify({
-      keyEntries: { [`archive_key_${USER}`]: "b".repeat(64) },
-      ratchetStates: {},
+  it("does not overwrite a ratchet state that already exists locally", async () => {
+    mockEncryptedState.set(`ratchetState_v3_${USER}_a:b`, "current-newer");
+    const bundle = JSON.stringify({
+      keyEntries: {},
+      ratchetStates: { [`ratchetState_v3_${USER}_a:b`]: "stale-from-backup" },
     });
 
-    await importKeyBundle(modern);
+    await importKeyBundle(bundle);
 
-    expect(mockKvStore.get(`archive_key_${USER}`)).toBe("b".repeat(64));
-    expect(mockInsertedMessages).toHaveLength(0);
+    expect(mockEncryptedState.get(`ratchetState_v3_${USER}_a:b`)).toBe(
+      "current-newer",
+    );
   });
 });
