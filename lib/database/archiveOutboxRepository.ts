@@ -106,11 +106,4 @@ export const archiveOutboxRepo = {
       msgIds,
     );
   },
-
-  async countPending(): Promise<number> {
-    const row = await getDb().getFirstAsync<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM archive_outbox WHERE status = 'pending'`,
-    );
-    return row?.c ?? 0;
-  },
 };

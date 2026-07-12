@@ -9,7 +9,6 @@ jest.mock("../../supabase", () => ({ supabase: { from: jest.fn() } }));
 jest.mock("../../database/archiveOutboxRepository", () => ({
   archiveOutboxRepo: {
     getPending: jest.fn(),
-    countPending: jest.fn(),
     markDone: jest.fn(),
     bumpAttempts: jest.fn(),
     markFailed: jest.fn(),
@@ -52,9 +51,6 @@ beforeEach(() => {
         .filter((r) => r.status === "pending")
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .slice(0, limit),
-  );
-  (archiveOutboxRepo.countPending as jest.Mock).mockImplementation(
-    async () => rows.filter((r) => r.status === "pending").length,
   );
   (archiveOutboxRepo.markDone as jest.Mock).mockImplementation(
     async (ids: string[]) => {
