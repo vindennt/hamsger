@@ -53,12 +53,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     sessions: { ...state.sessions, [convId]: session }
   })),
 
+  // NOTE: does NOT clear messagesDB. This runs on every (re)init of contacts/
+  // sessions — including spurious re-runs when Supabase rotates the auth token
+  // and hands us a new `user` object — so wiping messages here dropped the whole
+  // in-memory chat log until the screen remounted. Messages are keyed by
+  // conversationId and deduped by id, so keeping them across re-init is safe; a
+  // real account switch clears everything via reset().
   initData: (contacts, identities, sessions, peer) => set({
     contacts,
     identities,
     sessions,
     currentPeer: peer,
-    messagesDB: {},
     isReady: true,
   }),
 

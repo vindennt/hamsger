@@ -14,6 +14,7 @@ import {
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
+import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import { ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
@@ -27,6 +28,7 @@ import {
 } from "./ratchetHelpers";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
+import { useBackupAutoRefresh } from "./useBackupAutoRefresh";
 import { useOutbox } from "./useOutbox";
 
 export function SessionManager() {
@@ -60,6 +62,9 @@ export function SessionManager() {
 
   // Retry pending sends on foreground / reconnect / timer.
   useOutbox(isReady);
+
+  // #8: checkpoint the (slim) backup blob when the app is backgrounded / hidden.
+  useBackupAutoRefresh(user?.id);
 
   useEffect(() => {
     if (!user) return;
@@ -136,7 +141,11 @@ export function SessionManager() {
     }
 
     setupUserCryptoAndContacts();
-  }, [user, refreshTrigger]);
+    // Key on user?.id, NOT the user object: Supabase hands us a fresh `user`
+    // object on every token auto-refresh, and re-running full crypto/contacts
+    // init (and initData) on each of those was needless churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, refreshTrigger]);
 
   useEffect(() => {
     if (!user) return;
@@ -269,6 +278,9 @@ export function SessionManager() {
             archiveErr,
           ),
         );
+
+        // Throttled #8: keep the durable ratchet-state backup from going stale.
+        noteMessageForBackupRefresh(currentUserId);
 
         const decryptedMsg = {
           ...msg,
