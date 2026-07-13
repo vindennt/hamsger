@@ -1,4 +1,5 @@
 import { kv } from "../database/kv";
+import { backupKeyCache } from "../crypto/backupKeyCache";
 import { clearLocalKeyMaterial } from "../crypto/onboarding";
 import { supabase } from "../supabase";
 
@@ -20,6 +21,7 @@ export async function isSessionExpired(): Promise<boolean> {
 export async function forceExpireSession(): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (user) await clearLocalKeyMaterial(user.id);
+  backupKeyCache.clear();
   await supabase.auth.signOut();
   await kv.remove(LAST_ACTIVE_KEY);
 }

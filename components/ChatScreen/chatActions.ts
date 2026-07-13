@@ -10,6 +10,7 @@ import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { ratchetEncrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { archiveMessage, type ArchiveInput } from "../../lib/crypto/messageArchive";
+import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import { flushOutbox } from "../../lib/outbox/outbox";
 
 export async function sendMessage(inputText: string) {
@@ -146,5 +147,7 @@ export async function sendMessage(inputText: string) {
         console.error("Failed to archive sent message:", e),
       );
     }
+    // Throttled #8: keep the durable ratchet-state backup from going stale.
+    noteMessageForBackupRefresh(currentUserId);
   }
 }

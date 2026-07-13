@@ -1,6 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { kv } from "../database/kv";
 import { supabase } from "../supabase";
+import { backupKeyCache } from "./backupKeyCache";
 import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
 import { loadEncryptedState, saveEncryptedState } from "./secureStore";
@@ -149,6 +150,9 @@ export async function encryptKeyBundle(
   userId: string,
 ): Promise<BackupPayload> {
   const kBackupHex = toHex(getRandomBytes(32));
+  // Cache for #8 auto-refresh: setup-pin is the one place both secrets are
+  // present, so subsequent throttled refreshes can re-wrap the blob key-only.
+  backupKeyCache.set(userId, kBackupHex);
 
   const bundleEnc = await X3DH.encrypt(kBackupHex, bundle);
 
@@ -202,6 +206,20 @@ export async function refreshBackupBundle(
     existing.iv_pin,
     existing.auth_tag_pin,
   );
+  // Cache the recovered key so #8 auto-refresh can re-wrap later without the PIN.
+  backupKeyCache.set(userId, kBackupHex);
+  return rewrapBundleWithBackupKey(existing, newBundle, kBackupHex);
+}
+
+// Re-encrypts only the bundle ciphertext under an already-known K_backup, leaving
+// the PIN/mnemonic wraps untouched. This is the cheap path (no Argon2id, no PIN)
+// used by #8 auto-refresh with the session-cached key. `refreshBackupBundle` is
+// the PIN-driven wrapper that recovers K_backup first, then calls this.
+export async function rewrapBundleWithBackupKey(
+  existing: BackupPayload,
+  newBundle: string,
+  kBackupHex: string,
+): Promise<BackupPayload> {
   const bundleEnc = await X3DH.encrypt(kBackupHex, newBundle);
   return {
     ...existing,
@@ -224,6 +242,8 @@ export async function decryptKeyBundleWithPIN(
     payload.iv_pin,
     payload.auth_tag_pin,
   );
+  // Cache for #8 auto-refresh after a PIN restore.
+  backupKeyCache.set(userId, kBackupHex);
   return X3DH.decrypt(
     kBackupHex,
     payload.ciphertext_bundle,
@@ -250,6 +270,8 @@ export async function decryptKeyBundleWithMnemonic(
     payload.iv_mnemonic,
     payload.auth_tag_mnemonic,
   );
+  // Cache for #8 auto-refresh after a mnemonic restore.
+  backupKeyCache.set(userId, kBackupHex);
   return X3DH.decrypt(
     kBackupHex,
     payload.ciphertext_bundle,
