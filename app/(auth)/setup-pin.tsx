@@ -16,6 +16,7 @@ import {
   fieldStyles,
 } from "../../components/styles/auth.styles";
 import { useAuth } from "../../context/auth";
+import { writeMasterKeyCanary } from "../../lib/crypto/masterKeyCanary";
 import { ensureArchiveKey } from "../../lib/crypto/messageArchive";
 import {
   encryptKeyBundle,
@@ -73,6 +74,9 @@ export default function SetupPinScreen() {
       const bundle = await exportKeyBundle(user.id);
       const payload = await encryptKeyBundle(bundle, pin, seedHex, user.id);
       await saveBackupToCloud(user.id, payload);
+      // Witness that the current master key matches this device's data, so a
+      // later IndexedDB/OPFS desync is detected instead of silently failing.
+      await writeMasterKeyCanary(user.id);
       router.replace("/(tabs)");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save backup");

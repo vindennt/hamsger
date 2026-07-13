@@ -1,6 +1,7 @@
 import { kv } from "../database/kv";
 import { supabase } from "../supabase";
 import { keystore } from "./keystore";
+import { masterKeyMatchesLocalData } from "./masterKeyCanary";
 import { KeyPair, SigningKeyPair } from "./x3dh";
 
 async function publishKeyBundle(
@@ -164,6 +165,14 @@ export async function verifyUserKeysExist(
     localPub && (localPub.startsWith("pub_") || localPub.length !== 64);
 
   if (!localPub || isLegacyKey) {
+    return { identityKey: bundleData.identity_key, needsRestore: true };
+  }
+
+  // Identity keys are stored plaintext and survive independently of the at-rest
+  // master key. If that key can no longer decrypt this device's data (e.g. web
+  // IndexedDB cleared but OPFS SQLite survived), the local ciphertext is
+  // unreadable — route to restore instead of a silent "[Decryption Failed]" wall.
+  if (!(await masterKeyMatchesLocalData(userId))) {
     return { identityKey: bundleData.identity_key, needsRestore: true };
   }
 

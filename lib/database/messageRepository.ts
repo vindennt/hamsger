@@ -106,6 +106,25 @@ export const messageRepo = {
     return rows;
   },
 
+  // Returns up to `limit` raw (still-encrypted) local_plaintext blobs, for the
+  // master-key desync check — we only need to know whether the current key can
+  // decrypt them, not their contents. Filters to the encrypted `iv.tag.ct` form.
+  async sampleEncryptedPlaintext(limit: number = 5): Promise<string[]> {
+    const rows = await getDb().getAllAsync<{ local_plaintext: string | null }>(
+      "SELECT local_plaintext FROM messages WHERE local_plaintext IS NOT NULL LIMIT ?",
+      [limit],
+    );
+    return rows
+      .map((r) => r.local_plaintext)
+      .filter((v): v is string => !!v && v.includes("."));
+  },
+
+  // Discards all local messages. Used on desync recovery so a restore repopulates
+  // cleanly (restoreArchive's INSERT OR IGNORE would otherwise keep stale rows).
+  async clearAllMessages(): Promise<void> {
+    await getDb().runAsync("DELETE FROM messages");
+  },
+
   async logError(
     type: string,
     conversationId: string | null,

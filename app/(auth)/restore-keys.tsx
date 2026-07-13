@@ -13,6 +13,10 @@ import {
 } from "react-native";
 import { fieldStyles, styles as authStyles } from "../../components/styles/auth.styles";
 import { useAuth } from "../../context/auth";
+import {
+  clearLocalEncryptedData,
+  writeMasterKeyCanary,
+} from "../../lib/crypto/masterKeyCanary";
 import { restoreArchive } from "../../lib/crypto/messageArchive";
 import { resetUserKeys } from "../../lib/crypto/onboarding";
 import {
@@ -56,12 +60,17 @@ export default function RestoreKeysScreen() {
     setLoading(true);
     try {
       const bundle = await decryptKeyBundleWithPIN(backup, pin, user.id);
+      // Discard any unreadable local ciphertext (e.g. a master-key desync) so the
+      // restore below repopulates cleanly under the current key. No-op on a fresh
+      // device. Runs before import so it doesn't wipe the freshly restored ratchet.
+      await clearLocalEncryptedData(user.id);
       await importKeyBundle(bundle);
       // Pull full history back from the incremental cloud archive (identity keys
       // came from the blob above). Never fatal to a successful key restore.
       await restoreArchive(user.id).catch((e) =>
         console.error("[RestoreKeys] Archive restore failed:", e),
       );
+      await writeMasterKeyCanary(user.id);
       router.replace("/(tabs)");
     } catch {
       const next = pinAttempts + 1;
@@ -83,10 +92,12 @@ export default function RestoreKeysScreen() {
     try {
       const seedHex = mnemonicToSeed(mnemonicInput.trim());
       const bundle = await decryptKeyBundleWithMnemonic(backup, seedHex, user.id);
+      await clearLocalEncryptedData(user.id);
       await importKeyBundle(bundle);
       await restoreArchive(user.id).catch((e) =>
         console.error("[RestoreKeys] Archive restore failed:", e),
       );
+      await writeMasterKeyCanary(user.id);
       router.replace("/(tabs)");
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to restore with recovery phrase");
