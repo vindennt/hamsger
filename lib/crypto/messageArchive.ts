@@ -16,7 +16,7 @@ import { archiveOutboxRepo } from "../database/archiveOutboxRepository";
 import { messageRepo } from "../database/messageRepository";
 import { supabase } from "../supabase";
 import { flushArchiveOutbox } from "../outbox/archiveOutbox";
-import { readMaybeEncrypted } from "./secureStore";
+import { readMaybeEncrypted, saveEncryptedState } from "./secureStore";
 import { toHex, X3DH } from "./x3dh";
 
 // KV keys. `archive_key_${userId}` is deliberately backed up by exportKeyBundle;
@@ -60,7 +60,7 @@ export async function ensureArchiveKey(userId: string): Promise<string> {
   const existing = await readMaybeEncrypted(archiveKeyId(userId));
   if (existing) return existing;
   const key = toHex(getRandomBytes(32));
-  await kv.set(archiveKeyId(userId), key);
+  await saveEncryptedState(archiveKeyId(userId), key);
   return key;
 }
 

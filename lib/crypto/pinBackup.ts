@@ -5,6 +5,7 @@ import { backupKeyCache } from "./backupKeyCache";
 import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
 import {
+  isSecretKvKey,
   loadEncryptedState,
   readMaybeEncrypted,
   saveEncryptedState,
@@ -134,8 +135,13 @@ export async function importKeyBundle(bundle: string): Promise<void> {
     ratchetStates: Record<string, string>;
   };
 
+  // Re-encrypt secrets under THIS device's master key; public keys stay plaintext.
   for (const [key, value] of Object.entries(keyEntries)) {
-    await kv.set(key, value);
+    if (isSecretKvKey(key)) {
+      await saveEncryptedState(key, value);
+    } else {
+      await kv.set(key, value);
+    }
   }
 
   // Restore ratchet states only where none exist locally.

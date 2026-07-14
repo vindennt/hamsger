@@ -40,6 +40,16 @@ jest.mock("../../database/kv", () => ({
   },
 }));
 
+// archive_key is now encrypted at rest via secureStore. Storage is mocked here (this
+// suite tests the envelope/enqueue/restore flow, not at-rest encryption), so the
+// at-rest helpers are identity passthroughs into the in-memory kv.
+jest.mock("../secureStore", () => ({
+  readMaybeEncrypted: jest.fn(async (k: string) => mockKvStore.get(k) ?? null),
+  saveEncryptedState: jest.fn(async (k: string, v: string) => {
+    mockKvStore.set(k, v);
+  }),
+}));
+
 jest.mock("../../database/archiveOutboxRepository", () => ({
   archiveOutboxRepo: {
     enqueue: jest.fn(async (row: any) => {

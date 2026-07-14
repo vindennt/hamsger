@@ -23,6 +23,7 @@ jest.mock("../../database/kv", () => ({
 }));
 
 jest.mock("../secureStore", () => ({
+  isSecretKvKey: jest.requireActual("../secureStore").isSecretKvKey,
   loadEncryptedState: jest.fn(async (k: string) => mockEncryptedState.get(k) ?? null),
   saveEncryptedState: jest.fn(async (k: string, v: string) => {
     mockEncryptedState.set(k, v);
@@ -77,8 +78,10 @@ describe("importKeyBundle", () => {
 
     await importKeyBundle(bundle);
 
-    expect(mockKvStore.get(`ik_priv_${USER}`)).toBe("cafe");
-    expect(mockKvStore.get(`archive_key_${USER}`)).toBe("b".repeat(64));
+    // Secrets are re-encrypted under this device's key (→ encrypted-state store);
+    // public keys (none here) would land plaintext in kv.
+    expect(mockEncryptedState.get(`ik_priv_${USER}`)).toBe("cafe");
+    expect(mockEncryptedState.get(`archive_key_${USER}`)).toBe("b".repeat(64));
     expect(mockEncryptedState.get(`ratchetState_v3_${USER}_a:b`)).toBe(
       "ratchet-plain",
     );
