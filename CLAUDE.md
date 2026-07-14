@@ -2,6 +2,57 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+1. Think Before Coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+Before implementing:
+
+State your assumptions explicitly. If uncertain, ask.
+If multiple interpretations exist, present them - don't pick silently.
+If a simpler approach exists, say so. Push back when warranted.
+If something is unclear, stop. Name what's confusing. Ask. 2. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+No features beyond what was asked.
+No abstractions for single-use code.
+No "flexibility" or "configurability" that wasn't requested.
+No error handling for impossible scenarios.
+If you write 200 lines and it could be 50, rewrite it.
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+3. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code:
+
+Don't "improve" adjacent code, comments, or formatting.
+Don't refactor things that aren't broken.
+Match existing style, even if you'd do it differently.
+If you notice unrelated dead code, mention it - don't delete it.
+When your changes create orphans:
+
+Remove imports/variables/functions that YOUR changes made unused.
+Don't remove pre-existing dead code unless asked.
+The test: Every changed line should trace directly to the user's request.
+
+4. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals:
+
+"Add validation" → "Write tests for invalid inputs, then make them pass"
+"Fix the bug" → "Write a test that reproduces it, then make it pass"
+"Refactor X" → "Ensure tests pass before and after"
+For multi-step tasks, state a brief plan:
+
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+
 ## What this is
 
 Hamsger is an end-to-end encrypted messenger for **iOS and web** (no Android). Messages are encrypted on-device with X3DH key exchange + the Double Ratchet; the server (Supabase) should never see plaintext. Expo Router app running on React Native (iOS) and react-native-web (browser).
@@ -35,6 +86,7 @@ npx expo export --platform web   # web build → dist/ (Vercel picks up vercel.j
 **Message flow.** Send (`components/ChatScreen/chatActions.ts`): ratchet-encrypt → insert into Supabase `message_queue` (`{sender_id, recipient_id, payload}`) → also store local plaintext + optimistic UI. Receive (`components/ChatScreen/SessionManager.tsx`): `fetchInitialMessages` (drain queue on load) + a realtime `message_queue` INSERT subscription → `decryptAndAddMessage` → `ratchetDecrypt` → write to SQLite + Zustand → **delete the queue row**. So `message_queue` is **ephemeral transport**; the durable stores are local SQLite and the `encrypted_backups` blob.
 
 **Concurrency + trust invariants (easy to break):**
+
 - `withRatchetLock(convId, fn)` in `SessionManager` serializes decrypt per conversation (the ratchet is stateful). Route ratchet operations through it.
 - `messageRepo.messageExists(id)` is checked before decrypt to avoid double-advancing the ratchet when a prior queue-delete failed.
 - **Never trust `payload.sender` / `payload.conversation_id`** (attacker-controlled). Use the authenticated `sender_id` from the queue row; `conversation_id` is derived via `makeConversationId(userId, sender_id)` = the two UUIDs sorted and joined by `:`.

@@ -16,6 +16,7 @@ import { archiveOutboxRepo } from "../database/archiveOutboxRepository";
 import { messageRepo } from "../database/messageRepository";
 import { supabase } from "../supabase";
 import { flushArchiveOutbox } from "../outbox/archiveOutbox";
+import { readMaybeEncrypted } from "./secureStore";
 import { toHex, X3DH } from "./x3dh";
 
 // KV keys. `archive_key_${userId}` is deliberately backed up by exportKeyBundle;
@@ -56,7 +57,7 @@ function getRandomBytes(n: number): Uint8Array {
  * backup via exportKeyBundle; setup-pin calls this before the first export.
  */
 export async function ensureArchiveKey(userId: string): Promise<string> {
-  const existing = await kv.get(archiveKeyId(userId));
+  const existing = await readMaybeEncrypted(archiveKeyId(userId));
   if (existing) return existing;
   const key = toHex(getRandomBytes(32));
   await kv.set(archiveKeyId(userId), key);
@@ -150,7 +151,7 @@ interface ArchiveRow {
  * messageRepo.insertMessage). Call after importKeyBundle has restored the keys.
  */
 export async function restoreArchive(userId: string): Promise<number> {
-  const key = await kv.get(archiveKeyId(userId));
+  const key = await readMaybeEncrypted(archiveKeyId(userId));
   if (!key) return 0; // pre-archive backup: history (if any) came from the blob
 
   let restored = 0;

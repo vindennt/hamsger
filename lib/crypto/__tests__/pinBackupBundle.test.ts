@@ -27,6 +27,8 @@ jest.mock("../secureStore", () => ({
   saveEncryptedState: jest.fn(async (k: string, v: string) => {
     mockEncryptedState.set(k, v);
   }),
+  // Tolerant reader — the fixtures are plaintext, so it mirrors kv.get.
+  readMaybeEncrypted: jest.fn(async (k: string) => mockKvStore.get(k) ?? null),
 }));
 
 // Imported after the mocks above so jest's hoisted factories can close over the

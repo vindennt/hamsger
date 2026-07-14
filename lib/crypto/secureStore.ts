@@ -74,6 +74,39 @@ export async function aesDecrypt(
   return await X3DH.decrypt(keyHex, ciphertext, iv, authTag);
 }
 
+// Our at-rest format is `ivHex.authTagHex.ciphertextHex` — exactly three non-empty hex
+// segments. Legacy plaintext secrets (private keys / archive_key are a single hex token,
+// ratchet state JSON starts with "{") never match, so this distinguishes encrypted from
+// legacy plaintext during the at-rest migration and in the tolerant reader below.
+export function looksEncrypted(value: string): boolean {
+  const parts = value.split(".");
+  return (
+    parts.length === 3 && parts.every((p) => p.length > 0 && /^[0-9a-f]+$/i.test(p))
+  );
+}
+
+// KV keys holding secret material that must be encrypted at rest. Public keys are
+// published to the server anyway, so they stay plaintext (and keep
+// verifyUserKeysExist's ik_pub bootstrap read working).
+export function isSecretKvKey(key: string): boolean {
+  return key.includes("_priv") || key.startsWith("archive_key_");
+}
+
+// Reads a KV value that may be either legacy plaintext or AES-GCM ciphertext, and
+// returns plaintext either way. Unlike loadEncryptedState (which returns null for a
+// no-dot value), this passes legacy plaintext straight through, so it is safe to read
+// secrets before the at-rest migration has encrypted them.
+export async function readMaybeEncrypted(
+  kvKey: string,
+): Promise<string | null> {
+  const raw = await kv.get(kvKey);
+  if (raw === null) return null;
+  if (!looksEncrypted(raw)) return raw; // legacy plaintext
+  const masterKey = await getMasterKey();
+  if (!masterKey) return raw;
+  return aesDecrypt(raw, masterKey);
+}
+
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 /**

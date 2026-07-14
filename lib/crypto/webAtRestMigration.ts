@@ -8,20 +8,10 @@
 import { type SQLiteDatabase } from "expo-sqlite";
 import { Platform } from "react-native";
 import { kv } from "../database/kv";
-import { aesEncrypt, getMasterKey } from "./secureStore";
+import { aesEncrypt, getMasterKey, looksEncrypted } from "./secureStore";
 
 const MIGRATION_FLAG = "web_at_rest_migrated";
 const RATCHET_PREFIX = "ratchetState_v3_";
-
-// Our at-rest format is `ivHex.authTagHex.ciphertextHex` — exactly three non-empty hex
-// segments. Legacy values (ratchet JSON starts with "{"; message plaintext is arbitrary
-// text) don't match, so this reliably distinguishes already-encrypted from legacy.
-function looksEncrypted(value: string): boolean {
-  const parts = value.split(".");
-  return (
-    parts.length === 3 && parts.every((p) => p.length > 0 && /^[0-9a-f]+$/i.test(p))
-  );
-}
 
 export async function migrateWebAtRestIfNeeded(db: SQLiteDatabase): Promise<void> {
   if (Platform.OS !== "web") return;

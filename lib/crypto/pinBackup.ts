@@ -4,7 +4,11 @@ import { supabase } from "../supabase";
 import { backupKeyCache } from "./backupKeyCache";
 import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
-import { loadEncryptedState, saveEncryptedState } from "./secureStore";
+import {
+  loadEncryptedState,
+  readMaybeEncrypted,
+  saveEncryptedState,
+} from "./secureStore";
 import { toHex, X3DH } from "./x3dh";
 
 function getRandomBytes(n: number): Uint8Array {
@@ -95,14 +99,19 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     `archive_key_${userId}`,
   ];
 
+  // Read tolerantly: secret keys (private + archive_key) are decrypted to plaintext so
+  // they're portable to a new device; public keys pass straight through.
   const keyEntries: Record<string, string> = {};
   for (const key of knownKeys) {
-    const val = await kv.get(key);
+    const val = await readMaybeEncrypted(key);
     if (val) keyEntries[key] = val;
   }
 
   const opkRows = await kv.getAllByPrefix(`opk_priv_${userId}`);
-  for (const { key, value } of opkRows) keyEntries[key] = value;
+  for (const { key } of opkRows) {
+    const val = await readMaybeEncrypted(key);
+    if (val) keyEntries[key] = val;
+  }
 
   // Ratchet states are stored device-encrypted; export plaintext so they're
   // portable to new devices which will re-encrypt with their own master key.
