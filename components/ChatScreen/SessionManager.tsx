@@ -28,6 +28,7 @@ import {
 } from "./ratchetHelpers";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
+import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
 import { useBackupAutoRefresh } from "./useBackupAutoRefresh";
 import { useOutbox } from "./useOutbox";
 
@@ -330,7 +331,7 @@ export function SessionManager() {
       try {
         const rows = await messageRepo.getRecentMessages(
           activeConversationId,
-          30,
+          MESSAGE_PAGE_SIZE,
           0,
         );
         // Undelivered sends keep their pending/failed indicator across restarts.
@@ -338,17 +339,7 @@ export function SessionManager() {
           await outboxRepo.getStatusesByConversation(activeConversationId);
         // Map rows to UI messages
         for (const row of rows.reverse()) {
-          const uiMsg: EncryptedDbMessage = {
-            id: row.id,
-            conversation_id: row.conversation_id,
-            sender: row.sender_id,
-            timestamp: row.created_at_server,
-            text:
-              row.local_plaintext || "[Historical Message - Missing Plaintext]",
-            isDecrypted: true,
-            send_status: outboxStatuses[row.id],
-          } as any;
-          addMessage(row.conversation_id, uiMsg);
+          addMessage(row.conversation_id, rowToUiMessage(row, outboxStatuses));
         }
       } catch (err) {
         console.error("[SessionManager] Failed to load local messages:", err);
