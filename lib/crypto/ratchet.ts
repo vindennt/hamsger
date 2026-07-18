@@ -8,6 +8,16 @@ import cfg from "./config.json";
 const ROOT_INFO: string = cfg.root_kdf_info;
 export const MAX_SKIP: number = cfg.max_skip;
 
+// Thrown when a message would require skipping more than MAX_SKIP keys in one chain.
+// Typed so the receive path can treat it as a desync signal (→ session recovery)
+// instead of a bare error that permanently wedges the conversation.
+export class TooManySkippedError extends Error {
+  constructor(name: string) {
+    super(`${name}: too many skipped messages (>${MAX_SKIP})`);
+    this.name = "TooManySkippedError";
+  }
+}
+
 // KDF fxns
 
 export function kdfRootChain(
@@ -234,7 +244,7 @@ function skipMessageKeys(
 ): void {
   if (!state.CKr) return;
   if (until - state.Nr > MAX_SKIP) {
-    throw new Error(`${state.name}: too many skipped messages (>${MAX_SKIP})`);
+    throw new TooManySkippedError(state.name);
   }
   while (state.Nr < until) {
     const { nextCK, messageKey } = kdfMsgChain(state.CKr);
