@@ -1,5 +1,11 @@
-import { create } from 'zustand';
-import { UserIdentity, SessionContext, ConversationId, EncryptedDbMessage, SendStatus } from '../../components/ChatScreen/types';
+import { create } from "zustand";
+import {
+  ConversationId,
+  EncryptedDbMessage,
+  SendStatus,
+  SessionContext,
+  UserIdentity,
+} from "../../components/ChatScreen/types";
 
 interface ChatState {
   isReady: boolean;
@@ -19,16 +25,29 @@ interface ChatState {
   setIdentities: (identities: Record<string, UserIdentity>) => void;
   setSessions: (sessions: Record<ConversationId, SessionContext>) => void;
   addSession: (convId: ConversationId, session: SessionContext) => void;
-  
+
   // High-performance message appending
   addMessage: (convId: ConversationId, msg: EncryptedDbMessage) => void;
   setMessages: (convId: ConversationId, messages: EncryptedDbMessage[]) => void;
-  updateMessageStatus: (convId: ConversationId, msgId: string, status: SendStatus) => void;
+  prependMessages: (
+    convId: ConversationId,
+    olderMessages: EncryptedDbMessage[],
+  ) => void;
+  updateMessageStatus: (
+    convId: ConversationId,
+    msgId: string,
+    status: SendStatus,
+  ) => void;
 
-  initData: (contacts: UserIdentity[], identities: Record<string, UserIdentity>, sessions: Record<string, SessionContext>, peer: string) => void;
+  initData: (
+    contacts: UserIdentity[],
+    identities: Record<string, UserIdentity>,
+    sessions: Record<string, SessionContext>,
+    peer: string,
+  ) => void;
 
   setPendingRequests: (requests: any[]) => void;
-  
+
   reset: () => void;
 }
 
@@ -44,14 +63,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingRequests: [],
 
   setIsReady: (isReady) => set({ isReady }),
-  setCurrentUser: (currentUser, currentUserId) => set({ currentUser, currentUserId }),
+  setCurrentUser: (currentUser, currentUserId) =>
+    set({ currentUser, currentUserId }),
   setCurrentPeer: (currentPeer) => set({ currentPeer }),
   setContacts: (contacts) => set({ contacts }),
   setIdentities: (identities) => set({ identities }),
   setSessions: (sessions) => set({ sessions }),
-  addSession: (convId, session) => set((state) => ({
-    sessions: { ...state.sessions, [convId]: session }
-  })),
+  addSession: (convId, session) =>
+    set((state) => ({
+      sessions: { ...state.sessions, [convId]: session },
+    })),
 
   // NOTE: does NOT clear messagesDB. This runs on every (re)init of contacts/
   // sessions — including spurious re-runs when Supabase rotates the auth token
@@ -59,62 +80,87 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // in-memory chat log until the screen remounted. Messages are keyed by
   // conversationId and deduped by id, so keeping them across re-init is safe; a
   // real account switch clears everything via reset().
-  initData: (contacts, identities, sessions, peer) => set({
-    contacts,
-    identities,
-    sessions,
-    currentPeer: peer,
-    isReady: true,
-  }),
+  initData: (contacts, identities, sessions, peer) =>
+    set({
+      contacts,
+      identities,
+      sessions,
+      currentPeer: peer,
+      isReady: true,
+    }),
 
-  addMessage: (convId, msg) => set((state) => {
-    const existing = state.messagesDB[convId] || [];
-    if (existing.some((m) => m.id === msg.id)) return state; // Deduplicate
-    return {
+  addMessage: (convId, msg) =>
+    set((state) => {
+      const existing = state.messagesDB[convId] || [];
+      if (existing.some((m) => m.id === msg.id)) return state; // Deduplicate
+      return {
+        messagesDB: {
+          ...state.messagesDB,
+          [convId]: [...existing, msg].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          ),
+        },
+      };
+    }),
+
+  setMessages: (convId, messages) =>
+    set((state) => ({
       messagesDB: {
         ...state.messagesDB,
-        [convId]: [...existing, msg].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        [convId]: [...messages].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
         ),
       },
-    };
-  }),
+    })),
 
-  setMessages: (convId, messages) => set((state) => ({
-    messagesDB: {
-      ...state.messagesDB,
-      [convId]: [...messages].sort(
-        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      ),
-    }
-  })),
+  // Pagination
+  prependMessages: (convId, olderMessages) =>
+    set((state) => {
+      const existing = state.messagesDB[convId] || [];
+      const seen = new Set(existing.map((m) => m.id));
+      const fresh = olderMessages.filter((m) => !seen.has(m.id));
+      if (fresh.length === 0) return state;
+      return {
+        messagesDB: {
+          ...state.messagesDB,
+          [convId]: [...fresh, ...existing].sort(
+            (a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          ),
+        },
+      };
+    }),
 
-  updateMessageStatus: (convId, msgId, status) => set((state) => {
-    const existing = state.messagesDB[convId];
-    if (!existing) return state;
-    let changed = false;
-    const next = existing.map((m) => {
-      if (m.id === msgId && m.send_status !== status) {
-        changed = true;
-        return { ...m, send_status: status };
-      }
-      return m;
-    });
-    if (!changed) return state;
-    return { messagesDB: { ...state.messagesDB, [convId]: next } };
-  }),
+  updateMessageStatus: (convId, msgId, status) =>
+    set((state) => {
+      const existing = state.messagesDB[convId];
+      if (!existing) return state;
+      let changed = false;
+      const next = existing.map((m) => {
+        if (m.id === msgId && m.send_status !== status) {
+          changed = true;
+          return { ...m, send_status: status };
+        }
+        return m;
+      });
+      if (!changed) return state;
+      return { messagesDB: { ...state.messagesDB, [convId]: next } };
+    }),
 
   setPendingRequests: (pendingRequests) => set({ pendingRequests }),
 
-  reset: () => set({
-    isReady: false,
-    currentUser: "unauthorized",
-    currentUserId: "unauthorized-id",
-    currentPeer: "",
-    contacts: [],
-    identities: {},
-    sessions: {},
-    messagesDB: {},
-    pendingRequests: []
-  }),
+  reset: () =>
+    set({
+      isReady: false,
+      currentUser: "unauthorized",
+      currentUserId: "unauthorized-id",
+      currentPeer: "",
+      contacts: [],
+      identities: {},
+      sessions: {},
+      messagesDB: {},
+      pendingRequests: [],
+    }),
 }));
