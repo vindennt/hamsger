@@ -67,7 +67,6 @@ export function MessageList({ isMobile, setIsDrawerOpen }: MessageListProps) {
       loadingOlderRef.current = true;
       prevContentHeightRef.current = e.nativeEvent.contentSize.height;
       prevScrollYRef.current = y;
-.
       void loadOlder().then((fetched) => {
         if (fetched === 0) loadingOlderRef.current = false;
       });
