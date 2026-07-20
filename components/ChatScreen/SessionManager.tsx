@@ -15,8 +15,16 @@ import {
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
-import { ratchetDecrypt } from "../../lib/crypto/ratchet";
+import { ratchetDecrypt, TooManySkippedError } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
+import {
+  SESSION_RESET_TYPE,
+  clearDecryptFailures,
+  markReset,
+  noteDecryptFailure,
+  resetConversationRatchet,
+  shouldReset,
+} from "../../lib/crypto/ratchetRecovery";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
@@ -26,6 +34,12 @@ import {
   getOrCreateRatchetState,
   serializeRatchetState,
 } from "./ratchetHelpers";
+import {
+  RESET_NOTE_LOCAL,
+  RESET_NOTE_PEER,
+  makeSystemNote,
+  sendSessionReset,
+} from "./sessionReset";
 import { loadContactsAndSessions } from "./sessionHelpers";
 import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
 import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
@@ -291,6 +305,7 @@ export function SessionManager() {
         };
 
         addMessage(convId, decryptedMsg);
+        clearDecryptFailures(convId); // in sync again
       } catch (e: any) {
         console.error(
           `[SessionManager] Decryption failed for message ${msg.id}:`,
@@ -318,6 +333,18 @@ export function SessionManager() {
           isDecrypted: true,
         };
         addMessage(convId, failedMsg);
+
+        // Desync recovery: a skip-overflow, or repeated auth-tag failures, means the
+        // ratchet chains diverged. Reset locally (we already hold the ratchet lock)
+        // and tell the peer so both re-establish from the deterministic session.
+        const immediate = e instanceof TooManySkippedError;
+        if (!immediate) noteDecryptFailure(convId);
+        if (shouldReset(convId, { immediate })) {
+          markReset(convId);
+          await resetConversationRatchet(currentUserId, convId);
+          addMessage(convId, makeSystemNote(convId, RESET_NOTE_LOCAL));
+          void sendSessionReset(currentUserId, authSenderId);
+        }
       }
     },
     [addMessage, currentUserId, currentUser],
@@ -367,11 +394,20 @@ export function SessionManager() {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
             const convId = makeConversationId(user.id, row.sender_id);
-            const alreadyStored = await messageRepo.messageExists(payload.id);
-            if (!alreadyStored) {
+            if (payload.type === SESSION_RESET_TYPE) {
               await withRatchetLock(convId, () =>
-                decryptAndAddMessage(convId, payload, row.sender_id),
+                resetConversationRatchet(user.id, convId),
               );
+              useChatStore
+                .getState()
+                .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+            } else {
+              const alreadyStored = await messageRepo.messageExists(payload.id);
+              if (!alreadyStored) {
+                await withRatchetLock(convId, () =>
+                  decryptAndAddMessage(convId, payload, row.sender_id),
+                );
+              }
             }
             try {
               await supabase.from("message_queue").delete().eq("id", row.id);
@@ -408,11 +444,20 @@ export function SessionManager() {
 
             const newMsg = newRow.payload as EncryptedDbMessage;
             const convId = makeConversationId(user.id, newRow.sender_id);
-            const alreadyStored = await messageRepo.messageExists(newMsg.id);
-            if (!alreadyStored) {
+            if (newMsg.type === SESSION_RESET_TYPE) {
               await withRatchetLock(convId, () =>
-                decryptAndAddMessage(convId, newMsg, newRow.sender_id),
+                resetConversationRatchet(user.id, convId),
               );
+              useChatStore
+                .getState()
+                .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+            } else {
+              const alreadyStored = await messageRepo.messageExists(newMsg.id);
+              if (!alreadyStored) {
+                await withRatchetLock(convId, () =>
+                  decryptAndAddMessage(convId, newMsg, newRow.sender_id),
+                );
+              }
             }
             try {
               await supabase.from("message_queue").delete().eq("id", newRow.id);

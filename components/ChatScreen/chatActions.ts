@@ -1,4 +1,13 @@
-import { EncryptedDbMessage } from "./types";
+import { EncryptedDbMessage, makeConversationId } from "./types";
+import {
+  markReset,
+  resetConversationRatchet,
+} from "../../lib/crypto/ratchetRecovery";
+import {
+  RESET_NOTE_LOCAL,
+  makeSystemNote,
+  sendSessionReset,
+} from "./sessionReset";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
 import { useChatStore } from "../../lib/store/useChatStore";
@@ -12,6 +21,27 @@ import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import { archiveMessage, type ArchiveInput } from "../../lib/crypto/messageArchive";
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import { flushOutbox } from "../../lib/outbox/outbox";
+
+/**
+ * Manual "Reset session" for the active conversation: wipe local ratchet state so
+ * it re-inits from the deterministic session, and signal the peer to do the same.
+ * The fallback for when auto-detection misses (or to break a wedged chat by hand).
+ */
+export async function resetConversation(): Promise<void> {
+  const { currentUserId, currentPeer, identities } = useChatStore.getState();
+  const peer = identities[currentPeer];
+  if (!peer) return;
+
+  const convId = makeConversationId(currentUserId, peer.uuid);
+  await withRatchetLock(convId, () =>
+    resetConversationRatchet(currentUserId, convId),
+  );
+  markReset(convId); // start cooldown so the auto-path doesn't immediately re-fire
+  useChatStore
+    .getState()
+    .addMessage(convId, makeSystemNote(convId, RESET_NOTE_LOCAL));
+  await sendSessionReset(currentUserId, peer.uuid);
+}
 
 export async function sendMessage(inputText: string) {
   if (!inputText.trim()) return;
