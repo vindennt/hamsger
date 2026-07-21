@@ -24,6 +24,7 @@ interface RecoveryState {
 }
 
 const byConv = new Map<string, RecoveryState>();
+const hydrated = new Set<string>();
 
 function entry(convId: string): RecoveryState {
   let s = byConv.get(convId);
@@ -32,6 +33,23 @@ function entry(convId: string): RecoveryState {
     byConv.set(convId, s);
   }
   return s;
+}
+
+const cooldownKey = (convId: string) => `reset_cooldown_${convId}`;
+
+/**
+ * Load the persisted last-reset time once per conversation so the cooldown
+ * carries over a reload
+ */
+export async function hydrateCooldown(convId: string): Promise<void> {
+  if (hydrated.has(convId)) return;
+  hydrated.add(convId);
+  const stored = await kv.get(cooldownKey(convId));
+  const ts = stored ? parseInt(stored, 10) : NaN;
+  if (!Number.isNaN(ts)) {
+    const s = entry(convId);
+    s.lastResetAt = Math.max(s.lastResetAt, ts);
+  }
 }
 
 /** Count a decrypt failure toward the auto-reset threshold. */
@@ -65,6 +83,7 @@ export function markReset(convId: string): void {
   const s = entry(convId);
   s.failures = 0;
   s.lastResetAt = Date.now();
+  void kv.set(cooldownKey(convId), String(s.lastResetAt)); // persist for reload
 }
 
 /**
@@ -82,4 +101,5 @@ export async function resetConversationRatchet(
 /** Test-only: clear the in-memory recovery bookkeeping. */
 export function __resetRecoveryState(): void {
   byConv.clear();
+  hydrated.clear();
 }

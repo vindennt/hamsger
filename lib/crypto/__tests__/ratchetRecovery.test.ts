@@ -7,6 +7,7 @@ import { ratchetDecrypt, ratchetEncrypt } from "../ratchet";
 import {
   __resetRecoveryState,
   clearDecryptFailures,
+  hydrateCooldown,
   markReset,
   noteDecryptFailure,
   RESET_COOLDOWN_MS,
@@ -17,13 +18,20 @@ import {
 import { KeyPair } from "../x3dh";
 
 jest.mock("../../database/kv", () => ({
-  kv: { remove: jest.fn().mockResolvedValue(undefined) },
+  kv: {
+    remove: jest.fn().mockResolvedValue(undefined),
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue(undefined),
+  },
 }));
 
 const noop = () => {};
 
 describe("recovery decision logic", () => {
-  beforeEach(() => __resetRecoveryState());
+  beforeEach(() => {
+    __resetRecoveryState();
+    jest.clearAllMocks();
+  });
 
   it("resets only after the failure threshold, and immediate bypasses it", () => {
     const c = "conv1";
@@ -62,6 +70,27 @@ describe("recovery decision logic", () => {
   it("resetConversationRatchet deletes the conversation's ratchet state row", async () => {
     await resetConversationRatchet("user-1", "a:b");
     expect(kv.remove).toHaveBeenCalledWith("ratchetState_v3_user-1_a:b");
+  });
+
+  it("cooldown persists across a reload via hydrateCooldown", async () => {
+    const c = "conv-persist";
+    const now = 2_000_000_000_000;
+    const spy = jest.spyOn(Date, "now").mockReturnValue(now);
+    try {
+      markReset(c);
+      expect(kv.set).toHaveBeenCalledWith(`reset_cooldown_${c}`, String(now));
+
+      // Simulate a reload: in-memory state gone, but KV still holds the timestamp.
+      __resetRecoveryState();
+      (kv.get as jest.Mock).mockResolvedValueOnce(String(now));
+      await hydrateCooldown(c);
+
+      expect(shouldReset(c, { immediate: true })).toBe(false); // still cooling down
+      spy.mockReturnValue(now + RESET_COOLDOWN_MS + 1);
+      expect(shouldReset(c, { immediate: true })).toBe(true); // past cooldown
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

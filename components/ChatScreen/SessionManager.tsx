@@ -9,17 +9,18 @@ import {
   sendFriendRequest,
 } from "../../lib/contacts";
 import { verifyUserKeysExist } from "../../lib/crypto";
+import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import {
   archiveMessage,
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
-import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
-import { ratchetDecrypt, TooManySkippedError } from "../../lib/crypto/ratchet";
+import { TooManySkippedError, ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import {
   SESSION_RESET_TYPE,
   clearDecryptFailures,
+  hydrateCooldown,
   markReset,
   noteDecryptFailure,
   resetConversationRatchet,
@@ -34,17 +35,17 @@ import {
   getOrCreateRatchetState,
   serializeRatchetState,
 } from "./ratchetHelpers";
+import { loadContactsAndSessions } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   RESET_NOTE_PEER,
   makeSystemNote,
   sendSessionReset,
 } from "./sessionReset";
-import { loadContactsAndSessions } from "./sessionHelpers";
 import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
-import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
 import { useBackupAutoRefresh } from "./useBackupAutoRefresh";
 import { useOutbox } from "./useOutbox";
+import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
 
 export function SessionManager() {
   const { user } = useAuth();
@@ -339,6 +340,7 @@ export function SessionManager() {
         // and tell the peer so both re-establish from the deterministic session.
         const immediate = e instanceof TooManySkippedError;
         if (!immediate) noteDecryptFailure(convId);
+        await hydrateCooldown(convId);
         if (shouldReset(convId, { immediate })) {
           markReset(convId);
           await resetConversationRatchet(currentUserId, convId);
@@ -395,12 +397,17 @@ export function SessionManager() {
             const payload = row.payload as EncryptedDbMessage;
             const convId = makeConversationId(user.id, row.sender_id);
             if (payload.type === SESSION_RESET_TYPE) {
-              await withRatchetLock(convId, () =>
-                resetConversationRatchet(user.id, convId),
-              );
-              useChatStore
-                .getState()
-                .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+              // Block unlimited rewinds in case of malicious actor
+              await hydrateCooldown(convId);
+              if (shouldReset(convId, { immediate: true })) {
+                markReset(convId);
+                await withRatchetLock(convId, () =>
+                  resetConversationRatchet(user.id, convId),
+                );
+                useChatStore
+                  .getState()
+                  .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+              }
             } else {
               const alreadyStored = await messageRepo.messageExists(payload.id);
               if (!alreadyStored) {
@@ -445,12 +452,17 @@ export function SessionManager() {
             const newMsg = newRow.payload as EncryptedDbMessage;
             const convId = makeConversationId(user.id, newRow.sender_id);
             if (newMsg.type === SESSION_RESET_TYPE) {
-              await withRatchetLock(convId, () =>
-                resetConversationRatchet(user.id, convId),
-              );
-              useChatStore
-                .getState()
-                .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+              // Block unlimited rewinds in case of malicious actor
+              await hydrateCooldown(convId);
+              if (shouldReset(convId, { immediate: true })) {
+                markReset(convId);
+                await withRatchetLock(convId, () =>
+                  resetConversationRatchet(user.id, convId),
+                );
+                useChatStore
+                  .getState()
+                  .addMessage(convId, makeSystemNote(convId, RESET_NOTE_PEER));
+              }
             } else {
               const alreadyStored = await messageRepo.messageExists(newMsg.id);
               if (!alreadyStored) {
