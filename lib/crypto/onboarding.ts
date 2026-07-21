@@ -17,6 +17,7 @@ async function publishKeyBundle(
       identity_key: ik.publicKey,
       signed_prekey: spk.publicKey,
       spk_signature: signature,
+      signing_key: sigKP.publicKey,
     },
     { onConflict: "user_id" },
   );

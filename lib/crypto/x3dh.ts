@@ -180,6 +180,27 @@ export interface SPKBundle {
   signature: string;
 }
 
+/**
+ * Verifies an Ed25519 signature over a signed prekey using the publisher's
+ * public verify key. The signature is produced by SigningKeyPair.sign over the
+ * SPK public key hex string, so we encode the same string here.
+ */
+export function verifySignedPrekey(
+  signingPublicKeyHex: string,
+  signedPrekeyHex: string,
+  signatureHex: string,
+): boolean {
+  try {
+    return ed25519.verify(
+      fromHex(signatureHex),
+      encoder.encode(signedPrekeyHex),
+      fromHex(signingPublicKeyHex),
+    );
+  } catch {
+    return false;
+  }
+}
+
 // X3DH Core
 
 export const X3DH = {

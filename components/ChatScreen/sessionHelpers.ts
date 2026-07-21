@@ -1,7 +1,15 @@
 import { createSession } from "../../lib/crypto/createSession";
 import { keystore } from "../../lib/crypto/keystore";
+import { verifySignedPrekey } from "../../lib/crypto/x3dh";
 import { supabase } from "../../lib/supabase";
 import { makeConversationId, SessionContext, UserIdentity } from "./types";
+
+type PrekeyBundle = {
+  identity_key: string;
+  signed_prekey: string;
+  spk_signature: string;
+  signing_key: string | null;
+};
 
 /**
  * Loads the contact list from database, fetches their public keys, and initializes
@@ -51,11 +59,11 @@ export async function loadContactsAndSessions(
   // Guard: PostgREST treats `.in("user_id", [])` as no filter and returns EVERY
   // prekey bundle in the DB, so a zero-contact user must skip the query entirely.
   // TODO: Find a better way to handle this without special case
-  const bundlesByFriendId = new Map<string, { identity_key: string }>();
+  const bundlesByFriendId = new Map<string, PrekeyBundle>();
   if (friends.length > 0) {
     const { data: bundles } = await supabase
       .from("prekey_bundles")
-      .select("user_id, identity_key, signed_prekey")
+      .select("user_id, identity_key, signed_prekey, spk_signature, signing_key")
       .in(
         "user_id",
         friends.map((f) => f.friendId),
@@ -68,9 +76,21 @@ export async function loadContactsAndSessions(
   for (const { friendId, friendName } of friends) {
     // TODO: Diagnose this bug more where sometimes identiy key is not found and suddenly all chat log is "failed to send. For now, recognize it"
     const friendBundle = bundlesByFriendId.get(friendId);
-    if (!friendBundle?.identity_key) {
+    if (!friendBundle?.identity_key || !friendBundle.signing_key) {
       throw new Error(`Missing encryption keys for ${friendName}.`);
     }
+
+    // Reject a tampered bundle: the signed prekey must verify under the
+    // published Ed25519 key.
+    const valid = verifySignedPrekey(
+      friendBundle.signing_key,
+      friendBundle.signed_prekey,
+      friendBundle.spk_signature,
+    );
+    if (!valid) {
+      throw new Error(`Invalid signed prekey for ${friendName}.`);
+    }
+
     const friendPubKey = friendBundle.identity_key;
 
     const friendIdentity: UserIdentity = {
