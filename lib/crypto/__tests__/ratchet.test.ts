@@ -2,6 +2,7 @@
 // no supabase/db, so AES-GCM + KDF run for real with no stubs.
 import { createSession } from "../createSession";
 import {
+  __setSkipStoreCapForTests,
   MAX_SKIP,
   RatchetState,
   ratchetDecrypt,
@@ -49,5 +50,24 @@ describe("ratchet skip bound", () => {
     await expect(ratchetDecrypt(bob, last!, noop)).rejects.toBeInstanceOf(
       TooManySkippedError,
     );
+  });
+
+  it("caps the skipped-key store and evicts the oldest keys", async () => {
+    __setSkipStoreCapForTests(5);
+    try {
+      const { alice, bob } = makePair();
+      let last;
+      for (let i = 0; i < 11; i++) {
+        last = await ratchetEncrypt(alice, `m${i}`, noop);
+      }
+      // Bob jumps to N=10, skipping 0..9 → 10 keys stored, capped to the newest 5.
+      await ratchetDecrypt(bob, last!, noop);
+      expect(bob.skippedKeys.size).toBe(5);
+      const keys = [...bob.skippedKeys.keys()];
+      expect(keys.some((k) => k.endsWith(":0"))).toBe(false); // oldest evicted
+      expect(keys.some((k) => k.endsWith(":9"))).toBe(true); // newest kept
+    } finally {
+      __setSkipStoreCapForTests(null);
+    }
   });
 });
