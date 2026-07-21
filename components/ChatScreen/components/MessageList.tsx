@@ -113,6 +113,28 @@ export function MessageList({ isMobile, setIsDrawerOpen }: MessageListProps) {
           </View>
         ) : (
           messages.map((msg) => {
+            if (msg.system) {
+              return (
+                <View
+                  key={msg.id}
+                  style={{
+                    alignItems: "center",
+                    marginVertical: 8,
+                    paddingHorizontal: 16,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#8E8E93",
+                      fontSize: 12,
+                      textAlign: "center",
+                    }}
+                  >
+                    {msg.text}
+                  </Text>
+                </View>
+              );
+            }
             const isMe = msg.sender === currentUser;
             return (
               <View

@@ -8,6 +8,27 @@ import cfg from "./config.json";
 const ROOT_INFO: string = cfg.root_kdf_info;
 export const MAX_SKIP: number = cfg.max_skip;
 
+// Hard cap on retained skipped message keys across all chains. Bounds memory so a
+// peer can't force unbounded storage with crafted high-N messages; oldest keys are
+// evicted first (a dropped skipped key just means that one message stays unreadable).
+export const MAX_SKIP_STORE = 2000;
+
+// TODO: remove. This is for testing
+let skipStoreCap = MAX_SKIP_STORE;
+export function __setSkipStoreCapForTests(n: number | null): void {
+  skipStoreCap = n ?? MAX_SKIP_STORE;
+}
+
+// Thrown when a message would require skipping more than MAX_SKIP keys in one chain.
+// Typed so the receive path can treat it as a desync signal (→ session recovery)
+// instead of a bare error that permanently wedges the conversation.
+export class TooManySkippedError extends Error {
+  constructor(name: string) {
+    super(`${name}: too many skipped messages (>${MAX_SKIP})`);
+    this.name = "TooManySkippedError";
+  }
+}
+
 // KDF fxns
 
 export function kdfRootChain(
@@ -234,12 +255,16 @@ function skipMessageKeys(
 ): void {
   if (!state.CKr) return;
   if (until - state.Nr > MAX_SKIP) {
-    throw new Error(`${state.name}: too many skipped messages (>${MAX_SKIP})`);
+    throw new TooManySkippedError(state.name);
   }
   while (state.Nr < until) {
     const { nextCK, messageKey } = kdfMsgChain(state.CKr);
     const key = `${dhHex}:${state.Nr}`;
     state.skippedKeys.set(key, messageKey);
+    // FIFO eviction: keep the store bounded (Map preserves insertion order).
+    if (state.skippedKeys.size > skipStoreCap) {
+      state.skippedKeys.delete(state.skippedKeys.keys().next().value!);
+    }
     log(`  [${state.name}] 📦 Stored skipped MK for N=${state.Nr}`);
     state.CKr = nextCK;
     state.Nr += 1;

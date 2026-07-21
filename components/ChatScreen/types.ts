@@ -26,6 +26,7 @@ export interface Message {
   text: string;
   timestamp: Date;
   send_status?: SendStatus;
+  system?: boolean; // in-thread system note (e.g. session reset), not a real message
 }
 
 // Example DB schema
@@ -52,6 +53,14 @@ export interface EncryptedDbMessage {
 
   // Delivery state for sent messages (undefined for received messages).
   send_status?: SendStatus;
+
+  // Present on a control message (no crypto fields used) telling the peer to
+  // re-establish the session. See lib/crypto/ratchetRecovery.SESSION_RESET_TYPE.
+  type?: "session_reset";
+
+  // UI-only: an in-thread system note (e.g. "Secure session was reset"), not
+  // an encrypted message. Rendered centered/greyed by MessageList.
+  system?: boolean;
 }
 
 /**
@@ -66,6 +75,7 @@ export function toMessage(db: EncryptedDbMessage): Message {
     text: db.text, // raw ciphertext — swap for plaintext once decrypted
     timestamp: new Date(db.timestamp),
     send_status: db.send_status,
+    system: db.system,
   };
 }
 
