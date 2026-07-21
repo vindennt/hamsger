@@ -17,6 +17,7 @@ async function publishKeyBundle(
       identity_key: ik.publicKey,
       signed_prekey: spk.publicKey,
       spk_signature: signature,
+      signing_key: sigKP.publicKey,
     },
     { onConflict: "user_id" },
   );
@@ -99,6 +100,26 @@ export interface KeyVerificationResult {
   identityKey: string;
   needsPinSetup?: boolean;
   needsRestore?: boolean;
+}
+
+export interface PoppedOneTimePrekey {
+  id: string;
+  publicKey: string;
+}
+
+// Atomically claims (deletes) one of peerId's one-time prekeys via the
+// friends-only pop_one_time_prekey RPC. Returns null on error or an exhausted
+// pool so the caller can fall back to a no-OPK handshake.
+export async function popOneTimePrekey(
+  peerId: string,
+): Promise<PoppedOneTimePrekey | null> {
+  const { data, error } = await supabase.rpc("pop_one_time_prekey", {
+    target: peerId,
+  });
+  if (error || !data || data.length === 0) return null;
+
+  const row = data[0];
+  return { id: row.id, publicKey: row.public_key };
 }
 
 export async function verifyUserKeysExist(

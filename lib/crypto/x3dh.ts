@@ -180,27 +180,40 @@ export interface SPKBundle {
   signature: string;
 }
 
+/**
+ * Verifies an Ed25519 signature over a signed prekey using the publisher's
+ * public verify key. The signature is produced by SigningKeyPair.sign over the
+ * SPK public key hex string, so we encode the same string here.
+ */
+export function verifySignedPrekey(
+  signingPublicKeyHex: string,
+  signedPrekeyHex: string,
+  signatureHex: string,
+): boolean {
+  try {
+    return ed25519.verify(
+      fromHex(signatureHex),
+      encoder.encode(signedPrekeyHex),
+      fromHex(signingPublicKeyHex),
+    );
+  } catch {
+    return false;
+  }
+}
+
 // X3DH Core
 
 export const X3DH = {
-  deriveSessionKey(
-    dh1: string,
-    dh2: string,
-    dh3: string,
-    saltHex: string,
-    info: string,
-  ): string {
-    const dh1Bytes = fromHex(dh1);
-    const dh2Bytes = fromHex(dh2);
-    const dh3Bytes = fromHex(dh3);
-
-    // Concatenate DH inputs (IKM)
-    const ikm = new Uint8Array(
-      dh1Bytes.length + dh2Bytes.length + dh3Bytes.length,
-    );
-    ikm.set(dh1Bytes, 0);
-    ikm.set(dh2Bytes, dh1Bytes.length);
-    ikm.set(dh3Bytes, dh1Bytes.length + dh2Bytes.length);
+  deriveSessionKey(dhs: string[], saltHex: string, info: string): string {
+    // Concatenate the DH outputs in list order as HKDF IKM. Both sides pass the
+    // same DHs in the same order, so equal inputs derive an equal session key.
+    const parts = dhs.map(fromHex);
+    const ikm = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let offset = 0;
+    for (const p of parts) {
+      ikm.set(p, offset);
+      offset += p.length;
+    }
 
     const saltBytes = fromHex(saltHex);
     const infoBytes = encoder.encode(info);
