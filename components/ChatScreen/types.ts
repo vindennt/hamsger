@@ -61,6 +61,18 @@ export interface EncryptedDbMessage {
   // UI-only: an in-thread system note (e.g. "Secure session was reset"), not
   // an encrypted message. Rendered centered/greyed by MessageList.
   system?: boolean;
+
+  // Present only on the message that performed the initial X3DH handshake, so
+  // the responder can build its side of the session before decrypting.
+  prekey?: PrekeyHeader;
+}
+
+// The public keys the initiator sends in the first message of a conversation
+// opk: consumed onetime prekey's public key
+export interface PrekeyHeader {
+  ik: string;
+  ek: string;
+  opk: string | null;
 }
 
 /**
@@ -81,15 +93,3 @@ export function toMessage(db: EncryptedDbMessage): Message {
 
 // Placeholder used only when the mock log fails to load.
 export const FALLBACK_MESSAGES: Message[] = [];
-
-export interface SessionContext {
-  initiator: UserIdentity;
-  responder: UserIdentity;
-  SK: string;
-  meta: {
-    initiatorDHsCore: string;
-    initiatorDHsPub: string;
-    responderRatchetPub: string;
-    responderRatchetPriv?: string;
-  };
-}

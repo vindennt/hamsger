@@ -31,11 +31,8 @@ import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
-import {
-  getOrCreateRatchetState,
-  serializeRatchetState,
-} from "./ratchetHelpers";
-import { loadContactsAndSessions } from "./sessionHelpers";
+import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
+import { establishResponderSession, loadContacts } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   RESET_NOTE_PEER,
@@ -120,14 +117,14 @@ export function SessionManager() {
           publicKey: result.identityKey,
         };
 
-        const { resolvedContacts, newIdentities, initialSessions } =
-          await loadContactsAndSessions(userId, myIdentity);
+        const { resolvedContacts, newIdentities } = await loadContacts(
+          userId,
+          myIdentity,
+        );
 
         const peer =
           resolvedContacts.length > 0 ? resolvedContacts[0].name : "";
-        useChatStore
-          .getState()
-          .initData(resolvedContacts, newIdentities, initialSessions, peer);
+        useChatStore.getState().initData(resolvedContacts, newIdentities, peer);
 
         // Ensure the archive key exists (new keys are captured by the next
         // backup) and one-time backfill any pre-archive local history. Both are
@@ -230,22 +227,18 @@ export function SessionManager() {
       }
       const trustedSender = trustedIdentity.name;
 
-      const sessions = useChatStore.getState().sessions;
-      const session = sessions[convId];
-      if (!session) {
-        console.warn(
-          `[SessionManager] No session for ${convId}: message dropped, will be fetched from queue on next load`,
-        );
-        return;
-      }
-
       try {
-        const state = await getOrCreateRatchetState(
-          convId,
-          session,
-          currentUserId,
-          currentUser,
-        );
+        const state = msg.prekey
+          ? await establishResponderSession(currentUserId, msg.prekey)
+          : await loadRatchetState(convId, currentUserId);
+
+        if (!state) {
+          console.warn(
+            `[SessionManager] No local session for ${convId}: message dropped, peer must re-handshake`,
+          );
+          return;
+        }
+
         const ratchetMsg = {
           header: { DHpub: msg.dh_pub, PN: msg.pn, N: msg.n },
           ciphertext: msg.ciphertext,
@@ -337,7 +330,7 @@ export function SessionManager() {
 
         // Desync recovery: a skip-overflow, or repeated auth-tag failures, means the
         // ratchet chains diverged. Reset locally (we already hold the ratchet lock)
-        // and tell the peer so both re-establish from the deterministic session.
+        // and tell the peer so both re-establish via a fresh handshake.
         const immediate = e instanceof TooManySkippedError;
         if (!immediate) noteDecryptFailure(convId);
         await hydrateCooldown(convId);
@@ -349,7 +342,7 @@ export function SessionManager() {
         }
       }
     },
-    [addMessage, currentUserId, currentUser],
+    [addMessage, currentUserId],
   );
 
   // Load local messages for the active conversation

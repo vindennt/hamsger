@@ -1,27 +1,40 @@
 // Pure-crypto tests for the ratchet skip bound. ratchet.ts + createSession.ts import
 // no supabase/db, so AES-GCM + KDF run for real with no stubs.
-import { createSession } from "../createSession";
+import {
+  createInitiatorSession,
+  createResponderSession,
+} from "../createSession";
 import {
   __setSkipStoreCapForTests,
   MAX_SKIP,
-  RatchetState,
   ratchetDecrypt,
   ratchetEncrypt,
+  RatchetState,
   TooManySkippedError,
 } from "../ratchet";
 import { KeyPair } from "../x3dh";
 
 const noop = () => {};
 
-// A consistent Alice(initiator)/Bob(responder) ratchet pair from a deterministic session.
+// A consistent Alice(initiator)/Bob(responder) ratchet pair from a real X3DH handshake.
 function makePair(): { alice: RatchetState; bob: RatchetState } {
-  const aliceIK = new KeyPair("IK");
-  const bobIK = new KeyPair("IK");
-  // uuids sorted → "a" is initiator, "b" is responder (matches makeConversationId order).
-  const alice = { name: "alice", uuid: "a", publicKey: aliceIK.publicKey };
-  const bob = { name: "bob", uuid: "b", publicKey: bobIK.publicKey };
-  const sess = createSession(alice, bob, aliceIK.privateKey, bobIK.privateKey);
-  return { alice: sess.initiatorState!, bob: sess.responderState! };
+  const ikA = new KeyPair("IK_A");
+  const ikB = new KeyPair("IK_B");
+  const spkB = new KeyPair("SPK_B");
+  const ek = new KeyPair("EK_A");
+
+  const initiator = createInitiatorSession(ikA.privateKey, ek, {
+    identityKey: ikB.publicKey,
+    signedPrekey: spkB.publicKey,
+    oneTimePrekey: null,
+  });
+
+  const responder = createResponderSession(
+    { ikPriv: ikB.privateKey, spk: spkB, opkPriv: null },
+    { ik: ikA.publicKey, ek: ek.publicKey },
+  );
+
+  return { alice: initiator.state, bob: responder.state };
 }
 
 describe("ratchet skip bound", () => {

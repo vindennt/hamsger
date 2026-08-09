@@ -1,28 +1,26 @@
-import { createSession } from "../../lib/crypto/createSession";
+import {
+  createInitiatorSession,
+  createResponderSession,
+} from "../../lib/crypto/createSession";
 import { keystore } from "../../lib/crypto/keystore";
-import { verifySignedPrekey } from "../../lib/crypto/x3dh";
+import { popOneTimePrekey } from "../../lib/crypto/onboarding";
+import { RatchetState } from "../../lib/crypto/ratchet";
+import { KeyPair, verifySignedPrekey } from "../../lib/crypto/x3dh";
 import { supabase } from "../../lib/supabase";
-import { makeConversationId, SessionContext, UserIdentity } from "./types";
-
-type PrekeyBundle = {
-  identity_key: string;
-  signed_prekey: string;
-  spk_signature: string;
-  signing_key: string | null;
-};
+import { PrekeyHeader, UserIdentity } from "./types";
 
 /**
- * Loads the contact list from database, fetches their public keys, and initializes
- * local E2EE session contexts for each contact.
- * Session init is handled elsewhere
+ * Loads the contact list from the database and fetches their identity keys.
+ * Session setup is lazy: it happens on first send (initiator) or first
+ * receive-with-prekey-header (responder), see establishInitiatorSession /
+ * establishResponderSession below.
  */
-export async function loadContactsAndSessions(
+export async function loadContacts(
   userId: string,
   myIdentity: UserIdentity,
 ): Promise<{
   resolvedContacts: UserIdentity[];
   newIdentities: Record<string, UserIdentity>;
-  initialSessions: Record<string, SessionContext>;
 }> {
   const { data: requestsData, error: requestsError } = await supabase
     .from("friend_requests")
@@ -45,9 +43,7 @@ export async function loadContactsAndSessions(
   const newIdentities: Record<string, UserIdentity> = {
     [myIdentity.name]: myIdentity,
   };
-  const initialSessions: Record<string, SessionContext> = {};
 
-  // Request all prekeys at once
   const friends = (requestsData ?? []).map((item) => {
     const isFromMe = item.from_user_id === userId;
     const friendId = isFromMe ? item.to_user_id : item.from_user_id;
@@ -58,40 +54,25 @@ export async function loadContactsAndSessions(
 
   // Guard: PostgREST treats `.in("user_id", [])` as no filter and returns EVERY
   // prekey bundle in the DB, so a zero-contact user must skip the query entirely.
-  // TODO: Find a better way to handle this without special case
-  const bundlesByFriendId = new Map<string, PrekeyBundle>();
+  const identityKeyByFriendId = new Map<string, string>();
   if (friends.length > 0) {
     const { data: bundles } = await supabase
       .from("prekey_bundles")
-      .select("user_id, identity_key, signed_prekey, spk_signature, signing_key")
+      .select("user_id, identity_key")
       .in(
         "user_id",
         friends.map((f) => f.friendId),
       );
     for (const b of bundles ?? []) {
-      bundlesByFriendId.set(b.user_id, b);
+      identityKeyByFriendId.set(b.user_id, b.identity_key);
     }
   }
 
   for (const { friendId, friendName } of friends) {
-    // TODO: Diagnose this bug more where sometimes identiy key is not found and suddenly all chat log is "failed to send. For now, recognize it"
-    const friendBundle = bundlesByFriendId.get(friendId);
-    if (!friendBundle?.identity_key || !friendBundle.signing_key) {
+    const friendPubKey = identityKeyByFriendId.get(friendId);
+    if (!friendPubKey) {
       throw new Error(`Missing encryption keys for ${friendName}.`);
     }
-
-    // Reject a tampered bundle: the signed prekey must verify under the
-    // published Ed25519 key.
-    const valid = verifySignedPrekey(
-      friendBundle.signing_key,
-      friendBundle.signed_prekey,
-      friendBundle.spk_signature,
-    );
-    if (!valid) {
-      throw new Error(`Invalid signed prekey for ${friendName}.`);
-    }
-
-    const friendPubKey = friendBundle.identity_key;
 
     const friendIdentity: UserIdentity = {
       name: friendName,
@@ -101,34 +82,94 @@ export async function loadContactsAndSessions(
 
     resolvedContacts.push(friendIdentity);
     newIdentities[friendName] = friendIdentity;
-
-    // Sort identities to ensure both devices map initiator and responder the same
-    // TODO: is there a way to avoid this arbitrary step
-    const [initiator, responder] = [myIdentity, friendIdentity].sort((a, b) =>
-      a.uuid.localeCompare(b.uuid),
-    );
-
-    const isInitiator = initiator.uuid === userId;
-
-    const myPrivateKeyHex =
-      (await keystore.get(`ik_priv_${userId}`)) || undefined;
-
-    // Initialize X3DH dynamic session locally
-    const sess = createSession(
-      initiator,
-      responder,
-      isInitiator ? myPrivateKeyHex : undefined,
-      !isInitiator ? myPrivateKeyHex : undefined,
-    );
-    const convId = makeConversationId(userId, friendId);
-
-    initialSessions[convId] = {
-      initiator: initiator,
-      responder: responder,
-      SK: sess.SK,
-      meta: sess.meta,
-    };
   }
 
-  return { resolvedContacts, newIdentities, initialSessions };
+  return { resolvedContacts, newIdentities };
+}
+
+/**
+ * Initiator "Alice" side of the lazy handshake, run on first send to a peer:
+ * fetches + verifies the peer's published prekey bundle, pops a one-time
+ * prekey, and runs X3DH with a fresh ephemeral. Returns the bootstrapped
+ * ratchet state plus the prekey header to attach to the first message.
+ */
+export async function establishInitiatorSession(
+  userId: string,
+  peer: UserIdentity,
+): Promise<{ state: RatchetState; header: PrekeyHeader }> {
+  const { data: bundle, error } = await supabase
+    .from("prekey_bundles")
+    .select("identity_key, signed_prekey, spk_signature, signing_key")
+    .eq("user_id", peer.uuid)
+    .maybeSingle();
+
+  if (error || !bundle?.identity_key || !bundle.signing_key) {
+    throw new Error(`Missing encryption keys for ${peer.name}.`);
+  }
+
+  const valid = verifySignedPrekey(
+    bundle.signing_key,
+    bundle.signed_prekey,
+    bundle.spk_signature,
+  );
+  if (!valid) {
+    throw new Error(`Invalid signed prekey for ${peer.name}.`);
+  }
+
+  const popped = await popOneTimePrekey(peer.uuid);
+  const ek = new KeyPair("EK");
+
+  const myIkPriv = await keystore.get(`ik_priv_${userId}`);
+  if (!myIkPriv) {
+    throw new Error("Missing local identity key.");
+  }
+  const myIk = new KeyPair("IK", myIkPriv);
+
+  const { state } = createInitiatorSession(myIkPriv, ek, {
+    identityKey: bundle.identity_key,
+    signedPrekey: bundle.signed_prekey,
+    oneTimePrekey: popped?.publicKey ?? null,
+  });
+
+  return {
+    state,
+    header: {
+      ik: myIk.publicKey,
+      ek: ek.publicKey,
+      opk: popped?.publicKey ?? null,
+    },
+  };
+}
+
+/**
+ * Responder (Bob) side of the lazy handshake, run on receiving a message that
+ * carries a prekey header: recomputes the same X3DH secret from local prekey
+ * privates and consumes (deletes) the referenced one-time prekey for forward
+ * secrecy.
+ */
+export async function establishResponderSession(
+  userId: string,
+  header: PrekeyHeader,
+): Promise<RatchetState> {
+  const ikPriv = await keystore.get(`ik_priv_${userId}`);
+  const spkPrivHex = await keystore.get(`spk_priv_${userId}`);
+  if (!ikPriv || !spkPrivHex) {
+    throw new Error("Missing local prekeys to establish session.");
+  }
+  const spk = new KeyPair("SPK", spkPrivHex);
+
+  const opkPriv = header.opk
+    ? await keystore.get(`opk_priv_${userId}_${header.opk}`)
+    : null;
+
+  const { state } = createResponderSession(
+    { ikPriv, spk, opkPriv },
+    { ik: header.ik, ek: header.ek },
+  );
+
+  if (header.opk) {
+    await keystore.delete(`opk_priv_${userId}_${header.opk}`);
+  }
+
+  return state;
 }
