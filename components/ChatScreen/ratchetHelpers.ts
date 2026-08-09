@@ -3,25 +3,28 @@ import {
   RatchetState,
   serializeRatchetState,
 } from "../../lib/crypto/ratchet";
-import { loadEncryptedState } from "../../lib/crypto/secureStore";
+import {
+  EncryptedStateUnreadableError,
+  loadEncryptedStateStrict,
+} from "../../lib/crypto/secureStore";
 import { ConversationId } from "./types";
 
 /**
- * Loads and deserializes local X3DH or starts a new one if null
+ * Loads and deserializes the stored ratchet state. Returns null ONLY when no
+ * state exists yet. Do not abandon existing history in case
  */
 export async function loadRatchetState(
   convId: ConversationId,
   userId: string,
 ): Promise<RatchetState | null> {
   const stateKey = `ratchetState_v3_${userId}_${convId}`;
-  const stored = await loadEncryptedState(stateKey);
+  const stored = await loadEncryptedStateStrict(stateKey);
   if (!stored) return null;
 
   try {
     return deserializeRatchetState(JSON.parse(stored));
   } catch (e) {
-    console.error("Failed to parse stored ratchet state for " + convId, e);
-    return null;
+    throw new EncryptedStateUnreadableError(stateKey, e);
   }
 }
 

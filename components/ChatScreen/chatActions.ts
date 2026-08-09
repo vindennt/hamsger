@@ -1,24 +1,32 @@
-import { EncryptedDbMessage, makeConversationId } from "./types";
+import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import {
+  archiveMessage,
+  type ArchiveInput,
+} from "../../lib/crypto/messageArchive";
+import { RatchetState, ratchetEncrypt } from "../../lib/crypto/ratchet";
+import { withRatchetLock } from "../../lib/crypto/ratchetLock";
+import {
+  hydrateCooldown,
   markReset,
   resetConversationRatchet,
+  shouldReset,
 } from "../../lib/crypto/ratchetRecovery";
+import {
+  EncryptedStateUnreadableError,
+  saveEncryptedState,
+} from "../../lib/crypto/secureStore";
+import { messageRepo } from "../../lib/database/messageRepository";
+import { outboxRepo } from "../../lib/database/outboxRepository";
+import { flushOutbox } from "../../lib/outbox/outbox";
+import { useChatStore } from "../../lib/store/useChatStore";
+import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
+import { establishInitiatorSession } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   makeSystemNote,
   sendSessionReset,
 } from "./sessionReset";
-import { messageRepo } from "../../lib/database/messageRepository";
-import { outboxRepo } from "../../lib/database/outboxRepository";
-import { useChatStore } from "../../lib/store/useChatStore";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
-import { establishInitiatorSession } from "./sessionHelpers";
-import { saveEncryptedState } from "../../lib/crypto/secureStore";
-import { ratchetEncrypt } from "../../lib/crypto/ratchet";
-import { withRatchetLock } from "../../lib/crypto/ratchetLock";
-import { archiveMessage, type ArchiveInput } from "../../lib/crypto/messageArchive";
-import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
-import { flushOutbox } from "../../lib/outbox/outbox";
+import { EncryptedDbMessage, makeConversationId } from "./types";
 
 /**
  * Manual "Reset session" for the active conversation: wipe local ratchet state so
@@ -45,20 +53,20 @@ export async function sendMessage(inputText: string) {
   if (!inputText.trim()) return;
 
   const state = useChatStore.getState();
-  const {
-    currentUser,
-    currentUserId,
-    currentPeer,
-    identities,
-    addMessage
-  } = state;
+  const { currentUser, currentUserId, currentPeer, identities, addMessage } =
+    state;
 
   if (!currentPeer) return;
 
   const recipientIdentity = identities[currentPeer];
   if (!recipientIdentity) return;
 
-  const activeConversationId = [identities[currentUser]?.uuid, recipientIdentity.uuid].sort().join(":");
+  const activeConversationId = [
+    identities[currentUser]?.uuid,
+    recipientIdentity.uuid,
+  ]
+    .sort()
+    .join(":");
 
   if (!activeConversationId) {
     console.error("Encryption failed or late");
@@ -78,10 +86,36 @@ export async function sendMessage(inputText: string) {
     let ratchetMsg;
     let prekeyHeader: EncryptedDbMessage["prekey"];
     try {
-      let ratchetState = await loadRatchetState(
-        activeConversationId,
-        currentUserId,
-      );
+      let ratchetState: RatchetState | null = null;
+      try {
+        ratchetState = await loadRatchetState(
+          activeConversationId,
+          currentUserId,
+        );
+      } catch (e) {
+        if (!(e instanceof EncryptedStateUnreadableError)) throw e;
+        // Local ratchet state exists but is unreadable  Reset instead of starting a new ratchet so that history is preserved
+        await hydrateCooldown(activeConversationId);
+        if (!shouldReset(activeConversationId, { immediate: true })) {
+          console.warn(
+            `[chatActions] Ratchet state unreadable for ${activeConversationId} but within reset cooldown; send aborted`,
+          );
+          return null;
+        }
+        markReset(activeConversationId);
+        await resetConversationRatchet(currentUserId, activeConversationId);
+        await messageRepo
+          .logError(
+            "ratchet_reset",
+            activeConversationId,
+            null,
+            "Local ratchet state unreadable on send; reset and re-handshaked",
+          )
+          .catch(() => {});
+        console.warn(
+          `[chatActions] Ratchet state unreadable for ${activeConversationId}; reset and re-handshaking`,
+        );
+      }
       if (!ratchetState) {
         const established = await establishInitiatorSession(
           currentUserId,
