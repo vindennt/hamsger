@@ -3,7 +3,6 @@ import {
   ConversationId,
   EncryptedDbMessage,
   SendStatus,
-  SessionContext,
   UserIdentity,
 } from "../../components/ChatScreen/types";
 
@@ -14,7 +13,6 @@ interface ChatState {
   currentPeer: string;
   contacts: UserIdentity[];
   identities: Record<string, UserIdentity>;
-  sessions: Record<ConversationId, SessionContext>;
   messagesDB: Record<ConversationId, EncryptedDbMessage[]>;
   pendingRequests: any[];
 
@@ -23,8 +21,6 @@ interface ChatState {
   setCurrentPeer: (peer: string) => void;
   setContacts: (contacts: UserIdentity[]) => void;
   setIdentities: (identities: Record<string, UserIdentity>) => void;
-  setSessions: (sessions: Record<ConversationId, SessionContext>) => void;
-  addSession: (convId: ConversationId, session: SessionContext) => void;
 
   // High-performance message appending
   addMessage: (convId: ConversationId, msg: EncryptedDbMessage) => void;
@@ -42,7 +38,6 @@ interface ChatState {
   initData: (
     contacts: UserIdentity[],
     identities: Record<string, UserIdentity>,
-    sessions: Record<string, SessionContext>,
     peer: string,
   ) => void;
 
@@ -58,7 +53,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentPeer: "",
   contacts: [],
   identities: {},
-  sessions: {},
   messagesDB: {},
   pendingRequests: [],
 
@@ -68,11 +62,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setCurrentPeer: (currentPeer) => set({ currentPeer }),
   setContacts: (contacts) => set({ contacts }),
   setIdentities: (identities) => set({ identities }),
-  setSessions: (sessions) => set({ sessions }),
-  addSession: (convId, session) =>
-    set((state) => ({
-      sessions: { ...state.sessions, [convId]: session },
-    })),
 
   // NOTE: does NOT clear messagesDB. This runs on every (re)init of contacts/
   // sessions — including spurious re-runs when Supabase rotates the auth token
@@ -80,11 +69,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // in-memory chat log until the screen remounted. Messages are keyed by
   // conversationId and deduped by id, so keeping them across re-init is safe; a
   // real account switch clears everything via reset().
-  initData: (contacts, identities, sessions, peer) =>
+  initData: (contacts, identities, peer) =>
     set({
       contacts,
       identities,
-      sessions,
       currentPeer: peer,
       isReady: true,
     }),
@@ -159,7 +147,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentPeer: "",
       contacts: [],
       identities: {},
-      sessions: {},
       messagesDB: {},
       pendingRequests: [],
     }),

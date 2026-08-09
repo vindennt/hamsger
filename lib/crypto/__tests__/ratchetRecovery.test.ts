@@ -1,9 +1,6 @@
 // kv is mocked so resetConversationRatchet's delete is observable without a real DB.
-// The crypto (createSession/ratchet) runs for real to prove the convergence property.
 // jest.mock is hoisted above these imports by babel-jest, so `kv` resolves to the mock.
 import { kv } from "../../database/kv";
-import { createSession } from "../createSession";
-import { ratchetDecrypt, ratchetEncrypt } from "../ratchet";
 import {
   __resetRecoveryState,
   clearDecryptFailures,
@@ -15,7 +12,6 @@ import {
   SESSION_RESET_THRESHOLD,
   shouldReset,
 } from "../ratchetRecovery";
-import { KeyPair } from "../x3dh";
 
 jest.mock("../../database/kv", () => ({
   kv: {
@@ -24,8 +20,6 @@ jest.mock("../../database/kv", () => ({
     set: jest.fn().mockResolvedValue(undefined),
   },
 }));
-
-const noop = () => {};
 
 describe("recovery decision logic", () => {
   beforeEach(() => {
@@ -91,32 +85,5 @@ describe("recovery decision logic", () => {
     } finally {
       spy.mockRestore();
     }
-  });
-});
-
-describe("deterministic reset converges a desynced conversation", () => {
-  it("diverged decrypt fails, but re-init on both sides heals it", async () => {
-    const aIK = new KeyPair("IK");
-    const bIK = new KeyPair("IK");
-    const alice = { name: "alice", uuid: "a", publicKey: aIK.publicKey };
-    const bob = { name: "bob", uuid: "b", publicKey: bIK.publicKey };
-    const build = () => {
-      const s = createSession(alice, bob, aIK.privateKey, bIK.privateKey);
-      return { a: s.initiatorState!, b: s.responderState! };
-    };
-
-    // Advance Alice past a DH-ratchet step (Bob replies, Alice receives).
-    const s1 = build();
-    await ratchetDecrypt(s1.b, await ratchetEncrypt(s1.a, "a0", noop), noop);
-    await ratchetDecrypt(s1.a, await ratchetEncrypt(s1.b, "b0", noop), noop);
-
-    // A message from advanced Alice can't be read by a fresh (rewound) Bob.
-    const advanced = await ratchetEncrypt(s1.a, "a1", noop);
-    await expect(ratchetDecrypt(build().b, advanced, noop)).rejects.toThrow();
-
-    // Reset BOTH → fresh deterministic session → a new message decrypts.
-    const s2 = build();
-    const healed = await ratchetEncrypt(s2.a, "healed", noop);
-    expect(await ratchetDecrypt(s2.b, healed, noop)).toBe("healed");
   });
 });

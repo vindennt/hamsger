@@ -11,10 +11,8 @@ import {
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
 import { useChatStore } from "../../lib/store/useChatStore";
-import {
-  getOrCreateRatchetState,
-  serializeRatchetState
-} from "./ratchetHelpers";
+import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
+import { establishInitiatorSession } from "./sessionHelpers";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { ratchetEncrypt } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
@@ -52,7 +50,6 @@ export async function sendMessage(inputText: string) {
     currentUserId,
     currentPeer,
     identities,
-    sessions,
     addMessage
   } = state;
 
@@ -62,9 +59,8 @@ export async function sendMessage(inputText: string) {
   if (!recipientIdentity) return;
 
   const activeConversationId = [identities[currentUser]?.uuid, recipientIdentity.uuid].sort().join(":");
-  const session = sessions[activeConversationId];
 
-  if (!session || !activeConversationId) {
+  if (!activeConversationId) {
     console.error("Encryption failed or late");
     return;
   }
@@ -80,13 +76,20 @@ export async function sendMessage(inputText: string) {
   // "out of sequence" bug). The lock is shared with the receive path.
   const enqueued = await withRatchetLock(activeConversationId, async () => {
     let ratchetMsg;
+    let prekeyHeader: EncryptedDbMessage["prekey"];
     try {
-      const ratchetState = await getOrCreateRatchetState(
+      let ratchetState = await loadRatchetState(
         activeConversationId,
-        session,
         currentUserId,
-        currentUser
       );
+      if (!ratchetState) {
+        const established = await establishInitiatorSession(
+          currentUserId,
+          recipientIdentity,
+        );
+        ratchetState = established.state;
+        prekeyHeader = established.header;
+      }
       ratchetMsg = await ratchetEncrypt(ratchetState, text, () => {});
 
       // Save updated ratchet state
@@ -115,6 +118,7 @@ export async function sendMessage(inputText: string) {
       n: ratchetMsg.header.N,
       timestamp: new Date().toISOString(),
       text: ratchetMsg.ciphertext, // Server never sees plaintext
+      ...(prekeyHeader ? { prekey: prekeyHeader } : {}),
     };
 
     // Durable outbox row BEFORE any network call: an offline/transient send is
