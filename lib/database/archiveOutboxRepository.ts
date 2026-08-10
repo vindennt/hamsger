@@ -106,4 +106,17 @@ export const archiveOutboxRepo = {
       msgIds,
     );
   },
+
+  // Diagnostics
+  async getStatusCounts(): Promise<{ pending: number; failed: number }> {
+    const rows = await getDb().getAllAsync<{ status: string; n: number }>(
+      `SELECT status, COUNT(*) AS n FROM archive_outbox GROUP BY status`,
+    );
+    const counts = { pending: 0, failed: 0 };
+    for (const r of rows) {
+      if (r.status === "pending") counts.pending = r.n;
+      else if (r.status === "failed") counts.failed = r.n;
+    }
+    return counts;
+  },
 };

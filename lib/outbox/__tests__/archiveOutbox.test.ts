@@ -112,6 +112,23 @@ describe("flushArchiveOutbox", () => {
     expect(rows[0].attempts).toBe(1);
   });
 
+  it("retries a previously failed row on a later flush and delivers it", async () => {
+    rows = [makeRow({ msg_id: "a" })];
+
+    // 1st flush: forced network error → stays pending, attempts bumped.
+    mockUpsert.mockResolvedValueOnce({ error: { code: "08006" } });
+    await flushArchiveOutbox();
+    expect(rows[0].status).toBe("pending");
+    expect(rows[0].attempts).toBe(1);
+
+    // Elapse the backoff window; 2nd flush (default success) delivers it.
+    rows[0].last_attempt_at = new Date(Date.now() - 10_000).toISOString();
+    await flushArchiveOutbox();
+
+    expect(archiveOutboxRepo.markDone).toHaveBeenCalledWith(["a"]);
+    expect(rows).toHaveLength(0);
+  });
+
   it("marks a row failed after the attempt cap", async () => {
     rows = [makeRow({ msg_id: "a", attempts: 9 })];
     mockUpsert.mockResolvedValue({ error: { code: "08006" } });
