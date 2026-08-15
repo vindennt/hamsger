@@ -36,92 +36,94 @@ export default function ChatScreen() {
     }).start();
   }, [isDrawerOpen, drawerWidth, drawerAnim]);
 
-  if (!isReady) {
-    return (
-      <View
-        style={[
-          styles.root,
-          { justifyContent: "center", alignItems: "center" },
-        ]}
-      >
-        <SessionManager />
-        <ActivityIndicator size="small" color="#007AFF" />
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.root}>
+    <>
       <SessionManager />
 
-      <View style={styles.container}>
-        {/* DESKTOP SIDEBAR */}
-        {!isMobile && (
-          <View style={styles.sidebar}>
-            <ContactSidebar styles={styles} isMobile={false} />
-          </View>
-        )}
-
-        {/* MAIN PANE */}
-        <View style={[styles.mainPane, isMobile && { width: "100%" }]}>
-          <ChatHeader
-            styles={styles}
-            isMobile={isMobile}
-            setIsDrawerOpen={setIsDrawerOpen}
-          />
-
-          <MessageList isMobile={isMobile} setIsDrawerOpen={setIsDrawerOpen} />
-
-          <ChatInput isMobile={isMobile} />
+      {!isReady ? (
+        <View
+          style={[
+            styles.root,
+            { justifyContent: "center", alignItems: "center" },
+          ]}
+        >
+          <ActivityIndicator size="small" color="#007AFF" />
         </View>
+      ) : (
+        <View style={styles.root}>
+          <View style={styles.container}>
+            {/* DESKTOP SIDEBAR */}
+            {!isMobile && (
+              <View style={styles.sidebar}>
+                <ContactSidebar styles={styles} isMobile={false} />
+              </View>
+            )}
 
-        {/* MOBILE DRAWER BACKDROP */}
-        {isMobile && isDrawerOpen && (
-          <TouchableWithoutFeedback onPress={() => setIsDrawerOpen(false)}>
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: 0,
-                right: 0,
-                backgroundColor: "rgba(0,0,0,0.3)",
-                zIndex: 10,
-              }}
-            />
-          </TouchableWithoutFeedback>
-        )}
-
-        {/* MOBILE DRAWER */}
-        {isMobile && (
-          <Animated.View
-            style={[
-              {
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: 0,
-                backgroundColor: "#F9F9F9",
-                zIndex: 20,
-                borderRightWidth: StyleSheet.hairlineWidth,
-                borderRightColor: "#D1D1D6",
-              },
-              {
-                transform: [{ translateX: drawerAnim }],
-                width: drawerWidth,
-              },
-            ]}
-          >
-            <View style={{ flex: 1, paddingTop: 16 }}>
-              <ContactSidebar
+            {/* MAIN PANE */}
+            <View style={[styles.mainPane, isMobile && { width: "100%" }]}>
+              <ChatHeader
                 styles={styles}
-                isMobile={true}
+                isMobile={isMobile}
                 setIsDrawerOpen={setIsDrawerOpen}
               />
+
+              <MessageList
+                isMobile={isMobile}
+                setIsDrawerOpen={setIsDrawerOpen}
+              />
+
+              <ChatInput isMobile={isMobile} />
             </View>
-          </Animated.View>
-        )}
-      </View>
-    </View>
+
+            {/* MOBILE DRAWER BACKDROP */}
+            {isMobile && isDrawerOpen && (
+              <TouchableWithoutFeedback onPress={() => setIsDrawerOpen(false)}>
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: "rgba(0,0,0,0.3)",
+                    zIndex: 10,
+                  }}
+                />
+              </TouchableWithoutFeedback>
+            )}
+
+            {/* MOBILE DRAWER */}
+            {isMobile && (
+              <Animated.View
+                style={[
+                  {
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    backgroundColor: "#F9F9F9",
+                    zIndex: 20,
+                    borderRightWidth: StyleSheet.hairlineWidth,
+                    borderRightColor: "#D1D1D6",
+                  },
+                  {
+                    transform: [{ translateX: drawerAnim }],
+                    width: drawerWidth,
+                  },
+                ]}
+              >
+                <View style={{ flex: 1, paddingTop: 16 }}>
+                  <ContactSidebar
+                    styles={styles}
+                    isMobile={true}
+                    setIsDrawerOpen={setIsDrawerOpen}
+                  />
+                </View>
+              </Animated.View>
+            )}
+          </View>
+        </View>
+      )}
+    </>
   );
 }

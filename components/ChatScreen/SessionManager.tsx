@@ -491,7 +491,8 @@ export function SessionManager() {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, decryptAndAddMessage]);
+    // Keep user?.id and not user. Supabase token refresh means user is diff even if its same id, which re-triggers subscription  and can cause double decrypts
+  }, [user?.id, isReady, decryptAndAddMessage]);
 
   return null; // Headless component
 }
