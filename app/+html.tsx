@@ -17,6 +17,13 @@ export default function Root({ children }: PropsWithChildren) {
 
         <ScrollViewStyleReset />
 
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="Hamsger" />
+        <meta name="theme-color" content="#ffffff" />
+
         <style>{`
           html, body, #root { height: 100%; overflow: hidden; }
         `}</style>
