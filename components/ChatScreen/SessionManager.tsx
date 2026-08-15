@@ -492,6 +492,7 @@ export function SessionManager() {
       supabase.removeChannel(subscription);
     };
     // Keep user?.id and not user. Supabase token refresh means user is diff even if its same id, which re-triggers subscription  and can cause double decrypts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isReady, decryptAndAddMessage]);
 
   return null; // Headless component
