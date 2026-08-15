@@ -52,15 +52,22 @@ async function deliverBatch(rows: ArchiveOutboxRow[]): Promise<boolean> {
 
   if (!error) {
     await archiveOutboxRepo.markDone(ids);
+    console.log(`[archiveOutbox] delivered ${ids.length} row(s)`);
     return true;
   }
 
+  console.warn("[archiveOutbox] batch failed, will retry:", error.code);
   await archiveOutboxRepo.bumpAttempts(ids);
-  // Attempts were just bumped; a row now at/over the cap is abandoned.
+  // If outbox rows exceeded, cloud one abaandoned to not bloat it (local lives)
   const exhausted = rows
     .filter((r) => r.attempts + 1 >= MAX_ATTEMPTS)
     .map((r) => r.msg_id);
   await archiveOutboxRepo.markFailed(exhausted);
+  if (exhausted.length > 0) {
+    console.warn(
+      `[archiveOutbox] gave up on ${exhausted.length} row(s) after ${MAX_ATTEMPTS} attempts`,
+    );
+  }
   return false;
 }
 

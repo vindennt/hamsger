@@ -98,12 +98,10 @@ export class KeyPair {
   constructor(label: string = "unnamed", overridePrivateKeyHex?: string) {
     this.label = label;
     if (overridePrivateKeyHex) {
-      let privBytes: Uint8Array;
-      if (/^[0-9a-fA-F]{64}$/.test(overridePrivateKeyHex)) {
-        privBytes = fromHex(overridePrivateKeyHex);
-      } else {
-        privBytes = sha256(new TextEncoder().encode(overridePrivateKeyHex));
+      if (!/^[0-9a-fA-F]{64}$/.test(overridePrivateKeyHex)) {
+        throw new Error("KeyPair override must be a 32-byte hex private key");
       }
+      const privBytes = fromHex(overridePrivateKeyHex);
       this.privateKey = toHex(privBytes);
       this.publicKey = toHex(x25519.getPublicKey(privBytes));
     } else {
@@ -138,12 +136,12 @@ export class SigningKeyPair {
 
   constructor(overridePrivateKeyHex?: string) {
     if (overridePrivateKeyHex) {
-      let privBytes: Uint8Array;
-      if (/^[0-9a-fA-F]{64}$/.test(overridePrivateKeyHex)) {
-        privBytes = fromHex(overridePrivateKeyHex);
-      } else {
-        privBytes = sha256(new TextEncoder().encode(overridePrivateKeyHex));
+      if (!/^[0-9a-fA-F]{64}$/.test(overridePrivateKeyHex)) {
+        throw new Error(
+          "SigningKeyPair override must be a 32-byte hex private key",
+        );
       }
+      const privBytes = fromHex(overridePrivateKeyHex);
       this.privateKey = toHex(privBytes);
       this.publicKey = toHex(ed25519.getPublicKey(privBytes));
     } else {

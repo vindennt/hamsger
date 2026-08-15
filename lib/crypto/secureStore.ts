@@ -81,7 +81,8 @@ export async function aesDecrypt(
 export function looksEncrypted(value: string): boolean {
   const parts = value.split(".");
   return (
-    parts.length === 3 && parts.every((p) => p.length > 0 && /^[0-9a-f]+$/i.test(p))
+    parts.length === 3 &&
+    parts.every((p) => p.length > 0 && /^[0-9a-f]+$/i.test(p))
   );
 }
 
@@ -129,38 +130,53 @@ export async function saveEncryptedState(
 }
 
 /**
- * Reads and decrypts a ratchet state blob from the KV store.
- * Native: decrypts with AES-GCM using the device-bound master key.
- * Web: reads plaintext directly.
+ * Thrown when a KV row EXISTS but cannot be turned back into plaintext (wrong
+ * at-rest format, or an AES-GCM decrypt failure). Recover chat history
  */
-export async function loadEncryptedState(
+export class EncryptedStateUnreadableError extends Error {
+  readonly cause?: unknown;
+  constructor(kvKey: string, cause?: unknown) {
+    super(`Encrypted state for "${kvKey}" is present but unreadable`);
+    this.name = "EncryptedStateUnreadableError";
+    this.cause = cause;
+  }
+}
+
+/**
+ * Checks for corrupt Vs missing rows
+ */
+export async function loadEncryptedStateStrict(
   kvKey: string,
 ): Promise<string | null> {
   const raw = await kv.get(kvKey);
   if (!raw) return null;
 
   const masterKey = await getMasterKey();
-  if (masterKey) {
-    try {
-      // Check if it's the old XOR format (no dots) to prevent crashes during upgrade.
-      if (!raw.includes(".")) {
-        console.warn(
-          "[SecureStore] Old XOR format detected. State will be re-initialized.",
-        );
-        return null;
-      }
-      return await aesDecrypt(raw, masterKey);
-    } catch {
-      // If decryption fails (e.g., key rotation), return null to force re-initialization
-      console.warn(
-        `[SecureStore] Failed to decrypt state for key "${kvKey}". State will be re-initialized.`,
-      );
+  if (!masterKey) return raw; // web fallback: raw IS plaintext
+
+  if (!looksEncrypted(raw)) {
+    // Present but not our at-rest format (e.g. legacy XOR / stray plaintext).
+    throw new EncryptedStateUnreadableError(kvKey);
+  }
+  try {
+    return await aesDecrypt(raw, masterKey);
+  } catch (e) {
+    throw new EncryptedStateUnreadableError(kvKey, e);
+  }
+}
+
+export async function loadEncryptedState(
+  kvKey: string,
+): Promise<string | null> {
+  try {
+    return await loadEncryptedStateStrict(kvKey);
+  } catch (e) {
+    if (e instanceof EncryptedStateUnreadableError) {
+      console.warn(`[SecureStore] ${e.message}. State will be re-initialized.`);
       return null;
     }
+    throw e;
   }
-
-  // Web fallback: raw IS plaintext
-  return raw;
 }
 
 /**

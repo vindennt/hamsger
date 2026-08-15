@@ -13,9 +13,9 @@ export const MAX_SKIP: number = cfg.max_skip;
 // evicted first (a dropped skipped key just means that one message stays unreadable).
 export const MAX_SKIP_STORE = 2000;
 
-// TODO: remove. This is for testing
 let skipStoreCap = MAX_SKIP_STORE;
 export function __setSkipStoreCapForTests(n: number | null): void {
+  if (process.env.NODE_ENV !== "test") return;
   skipStoreCap = n ?? MAX_SKIP_STORE;
 }
 
@@ -141,8 +141,9 @@ export function initBob(
     skippedKeys: new Map(),
   };
 
-  // Perform a preemptive DH ratchet step using Alice's deterministic initial DH public key
-  // TODO: Need a cleaner way for te first ratchet, more hidden.
+  // Preemptive DH ratchet derives Bob's receiving chain from Alice's ephemeral EK
+  // That EK is also Alice's initial ratchet key, so her first
+  // message's dh_pub must match it which is checked on the receivers path inSessionManager
   const dhOut1 = state.DHs.dh(aliceDHsPubHex);
   const { newRK: rk1, newCK: newCKr } = kdfRootChain(state.RK, dhOut1);
 

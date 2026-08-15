@@ -116,7 +116,16 @@ export async function popOneTimePrekey(
   const { data, error } = await supabase.rpc("pop_one_time_prekey", {
     target: peerId,
   });
-  if (error || !data || data.length === 0) return null;
+  if (error) {
+    // RPC fails
+    console.warn(
+      "[onboarding] pop_one_time_prekey failed:",
+      error.code,
+      error.message,
+    );
+    return null;
+  }
+  if (!data || data.length === 0) return null; // pool exhausted (expected)
 
   const row = data[0];
   return { id: row.id, publicKey: row.public_key };

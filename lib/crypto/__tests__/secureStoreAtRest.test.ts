@@ -10,7 +10,11 @@ jest.mock("../../database/kv", () => ({
 }));
 
 /* eslint-disable import/first */
-import { isSecretKvKey, readMaybeEncrypted } from "../secureStore";
+import {
+  isSecretKvKey,
+  loadEncryptedStateStrict,
+  readMaybeEncrypted,
+} from "../secureStore";
 
 const USER = "user-uuid-1234";
 
@@ -51,5 +55,13 @@ describe("readMaybeEncrypted", () => {
   it("passes legacy plaintext (no iv.tag.ct format) straight through", async () => {
     mockStore.set(`ik_priv_${USER}`, "deadbeef");
     expect(await readMaybeEncrypted(`ik_priv_${USER}`)).toBe("deadbeef");
+  });
+});
+
+describe("loadEncryptedStateStrict", () => {
+  it("returns null for a genuinely absent row (not corrupt)", async () => {
+    expect(
+      await loadEncryptedStateStrict(`ratchetState_v3_${USER}_a:b`),
+    ).toBeNull();
   });
 });
