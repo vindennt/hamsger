@@ -15,7 +15,7 @@ import {
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
-import { TooManySkippedError, ratchetDecrypt } from "../../lib/crypto/ratchet";
+import { TooManySkippedError } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import {
   SESSION_RESET_TYPE,
@@ -26,13 +26,13 @@ import {
   resetConversationRatchet,
   shouldReset,
 } from "../../lib/crypto/ratchetRecovery";
-import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
+import { syncLog } from "../../lib/debug/syncLog";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
-import { establishResponderSession, loadContacts } from "./sessionHelpers";
+import { decryptStoreInbound } from "./inboundMessage";
+import { loadContacts } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   RESET_NOTE_PEER,
@@ -243,50 +243,22 @@ export function SessionManager() {
       }
 
       try {
-        const state = msg.prekey
-          ? await establishResponderSession(currentUserId, msg.prekey)
-          : await loadRatchetState(convId, currentUserId);
+        const result = await decryptStoreInbound(
+          convId,
+          currentUserId,
+          msg,
+          trustedSender,
+        );
 
-        if (!state) {
+        if (result.status === "skipped") return; // duplicate delivery, no-op
+        if (result.status === "no_state") {
           console.warn(
             `[SessionManager] No local session for ${convId}: message dropped, peer must re-handshake`,
           );
           return;
         }
 
-        const ratchetMsg = {
-          header: { DHpub: msg.dh_pub, PN: msg.pn, N: msg.n },
-          ciphertext: msg.ciphertext,
-          iv: msg.iv,
-          authTag: msg.auth_tag,
-        };
-
-        const noop = () => {};
-        const plaintext = await ratchetDecrypt(state, ratchetMsg, noop);
-
-        // Save updated ratchet state
-        await saveEncryptedState(
-          `ratchetState_v3_${currentUserId}_${convId}`,
-          JSON.stringify(serializeRatchetState(state)),
-        );
-
-        // Insert ciphertext into SQLite
-        try {
-          await messageRepo.insertMessage({
-            id: msg.id,
-            conversation_id: convId,
-            sender_id: trustedSender,
-            recipient_id: currentUserId,
-            created_at_server: msg.timestamp,
-            timestamp: new Date().toISOString(),
-            local_plaintext: plaintext,
-          });
-        } catch (dbErr) {
-          console.error(
-            "[SessionManager] Failed to insert decrypted message to DB:",
-            dbErr,
-          );
-        }
+        const plaintext = result.plaintext;
 
         // Fire-and-forget: stage this received message into the cloud archive.
         archiveMessage(currentUserId, {
@@ -313,9 +285,27 @@ export function SessionManager() {
           isDecrypted: true,
         };
 
+        syncLog("recv_ok", convId, {
+          msgId: msg.id,
+          sender: authSenderId,
+          n: msg.n,
+          pn: msg.pn,
+          dh: msg.dh_pub?.slice(0, 8),
+          prekey: !!msg.prekey,
+        });
+
         addMessage(convId, decryptedMsg);
         clearDecryptFailures(convId); // in sync again
       } catch (e: any) {
+        syncLog("recv_fail", convId, {
+          msgId: msg.id,
+          sender: authSenderId,
+          err: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+          n: msg.n,
+          pn: msg.pn,
+          dh: msg.dh_pub?.slice(0, 8),
+          prekey: !!msg.prekey,
+        });
         console.error(
           `[SessionManager] Decryption failed for message ${msg.id}:`,
           e,
@@ -351,6 +341,9 @@ export function SessionManager() {
         await hydrateCooldown(convId);
         if (shouldReset(convId, { immediate })) {
           markReset(convId);
+          syncLog("reset_auto", convId, {
+            trigger: immediate ? "skip_overflow" : "repeated_fail",
+          });
           await resetConversationRatchet(currentUserId, convId);
           addMessage(convId, makeSystemNote(convId, RESET_NOTE_LOCAL));
           void sendSessionReset(currentUserId, authSenderId);
@@ -409,6 +402,7 @@ export function SessionManager() {
               await hydrateCooldown(convId);
               if (shouldReset(convId, { immediate: true })) {
                 markReset(convId);
+                syncLog("reset_inbound", convId, {});
                 await withRatchetLock(convId, () =>
                   resetConversationRatchet(user.id, convId),
                 );
@@ -464,6 +458,7 @@ export function SessionManager() {
               await hydrateCooldown(convId);
               if (shouldReset(convId, { immediate: true })) {
                 markReset(convId);
+                syncLog("reset_inbound", convId, {});
                 await withRatchetLock(convId, () =>
                   resetConversationRatchet(user.id, convId),
                 );
@@ -496,7 +491,8 @@ export function SessionManager() {
     return () => {
       supabase.removeChannel(subscription);
     };
-  }, [user, isReady, decryptAndAddMessage]);
+    // Keep user?.id and not user. Supabase token refresh means user is diff even if its same id, which re-triggers subscription  and can cause double decrypts
+  }, [user?.id, isReady, decryptAndAddMessage]);
 
   return null; // Headless component
 }
