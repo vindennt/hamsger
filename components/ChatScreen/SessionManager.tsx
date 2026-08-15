@@ -15,7 +15,7 @@ import {
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
-import { TooManySkippedError, ratchetDecrypt } from "../../lib/crypto/ratchet";
+import { TooManySkippedError } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import {
   SESSION_RESET_TYPE,
@@ -26,14 +26,13 @@ import {
   resetConversationRatchet,
   shouldReset,
 } from "../../lib/crypto/ratchetRecovery";
-import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
 import { syncLog } from "../../lib/debug/syncLog";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
-import { establishResponderSession, loadContacts } from "./sessionHelpers";
+import { decryptStoreInbound } from "./inboundMessage";
+import { loadContacts } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   RESET_NOTE_PEER,
@@ -244,50 +243,22 @@ export function SessionManager() {
       }
 
       try {
-        const state = msg.prekey
-          ? await establishResponderSession(currentUserId, msg.prekey)
-          : await loadRatchetState(convId, currentUserId);
+        const result = await decryptStoreInbound(
+          convId,
+          currentUserId,
+          msg,
+          trustedSender,
+        );
 
-        if (!state) {
+        if (result.status === "skipped") return; // duplicate delivery, no-op
+        if (result.status === "no_state") {
           console.warn(
             `[SessionManager] No local session for ${convId}: message dropped, peer must re-handshake`,
           );
           return;
         }
 
-        const ratchetMsg = {
-          header: { DHpub: msg.dh_pub, PN: msg.pn, N: msg.n },
-          ciphertext: msg.ciphertext,
-          iv: msg.iv,
-          authTag: msg.auth_tag,
-        };
-
-        const noop = () => {};
-        const plaintext = await ratchetDecrypt(state, ratchetMsg, noop);
-
-        // Save updated ratchet state
-        await saveEncryptedState(
-          `ratchetState_v3_${currentUserId}_${convId}`,
-          JSON.stringify(serializeRatchetState(state)),
-        );
-
-        // Insert ciphertext into SQLite
-        try {
-          await messageRepo.insertMessage({
-            id: msg.id,
-            conversation_id: convId,
-            sender_id: trustedSender,
-            recipient_id: currentUserId,
-            created_at_server: msg.timestamp,
-            timestamp: new Date().toISOString(),
-            local_plaintext: plaintext,
-          });
-        } catch (dbErr) {
-          console.error(
-            "[SessionManager] Failed to insert decrypted message to DB:",
-            dbErr,
-          );
-        }
+        const plaintext = result.plaintext;
 
         // Fire-and-forget: stage this received message into the cloud archive.
         archiveMessage(currentUserId, {
