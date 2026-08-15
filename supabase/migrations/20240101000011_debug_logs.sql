@@ -18,9 +18,33 @@ create table if not exists public.debug_logs (
 alter table public.debug_logs enable row level security;
 
 -- owner-only read; default user_id = auth.uid() fills the column on insert
+drop policy if exists "read own debug logs" on public.debug_logs;
 create policy "read own debug logs" on public.debug_logs
   for select using (user_id = auth.uid());
+drop policy if exists "insert own debug logs" on public.debug_logs;
 create policy "insert own debug logs" on public.debug_logs
   for insert with check (user_id = auth.uid());
 
 grant select, insert on public.debug_logs to authenticated;
+
+-- Retention: self-prune on insert so the table stays bounded without pg_cron.
+-- Each insert deletes the same user's rows older than 7 days (same pattern as
+-- the message_send_log rate-limit trigger in migration ...0005).
+create or replace function public.prune_debug_logs()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.debug_logs
+   where user_id = new.user_id
+     and created_at < now() - interval '7 days';
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_prune_debug_logs on public.debug_logs;
+create trigger trg_prune_debug_logs
+  before insert on public.debug_logs
+  for each row execute function public.prune_debug_logs();

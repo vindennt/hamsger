@@ -2,12 +2,25 @@ import { Platform } from "react-native";
 import { kv } from "../database/kv";
 import { supabase } from "../supabase";
 
-// Diagnostic-only sync logging for the mobile/web multi-device desync
-// investigation. Writes structured events to Supabase `debug_logs` (owner-only)
-// so mobile traces, where the console is unreachable, can be read from the SQL
-// editor. Fire-and-forget: never awaited, never throws, never blocks the
-// message path. Kill switch: set ENABLED = false.
-const ENABLED = true;
+const FLAG_KEY = "debug_logging_enabled";
+
+let enabledCache: boolean | null = null;
+
+async function isEnabled(): Promise<boolean> {
+  if (enabledCache !== null) return enabledCache;
+  const v = await kv.get(FLAG_KEY).catch(() => null);
+  enabledCache = v === "1";
+  return enabledCache;
+}
+
+export async function getSyncLoggingEnabled(): Promise<boolean> {
+  return isEnabled();
+}
+
+export async function setSyncLoggingEnabled(on: boolean): Promise<void> {
+  enabledCache = on;
+  await kv.set(FLAG_KEY, on ? "1" : "0");
+}
 
 // Stable per-device tag so the two devices of one account are distinguishable
 // in the logs. Persisted in KV, cached in memory after first read.
@@ -29,9 +42,9 @@ export function syncLog(
   conversationId: string | null,
   detail?: Record<string, unknown>,
 ): void {
-  if (!ENABLED) return;
   void (async () => {
     try {
+      if (!(await isEnabled())) return;
       const device = await getDeviceId();
       await supabase.from("debug_logs").insert({
         device,

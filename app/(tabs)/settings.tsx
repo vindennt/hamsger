@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -7,6 +7,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -18,6 +19,10 @@ import {
   refreshBackupBundle,
   saveBackupToCloud,
 } from "../../lib/crypto/pinBackup";
+import {
+  getSyncLoggingEnabled,
+  setSyncLoggingEnabled,
+} from "../../lib/debug/syncLog";
 import { forceExpireSession } from "../../lib/session/sessionExpiry";
 
 export default function SettingsScreen() {
@@ -26,6 +31,16 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshPIN, setRefreshPIN] = useState("");
   const [showRefreshPIN, setShowRefreshPIN] = useState(false);
+  const [diagLogging, setDiagLogging] = useState(false);
+
+  useEffect(() => {
+    getSyncLoggingEnabled().then(setDiagLogging);
+  }, []);
+
+  async function handleToggleDiagLogging(on: boolean) {
+    setDiagLogging(on);
+    await setSyncLoggingEnabled(on);
+  }
 
   async function handleRefreshBackup() {
     if (!user) return;
@@ -131,6 +146,23 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Diagnostics</Text>
+          <View style={styles.switchRow}>
+            <View style={styles.switchLabel}>
+              <Text style={styles.rowTitle}>Sync logging</Text>
+              <Text style={styles.rowDescription}>
+                Logs message-sync events (no message text) to help debug
+                delivery issues. Leave off unless asked.
+              </Text>
+            </View>
+            <Switch
+              value={diagLogging}
+              onValueChange={handleToggleDiagLogging}
+            />
+          </View>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.sectionTitle}>Security</Text>
           <SettingRow
             title="Sign Out & Lock"
@@ -218,6 +250,16 @@ const styles = StyleSheet.create({
   },
   row: {
     paddingVertical: 12,
+  },
+  switchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    gap: 12,
+  },
+  switchLabel: {
+    flex: 1,
   },
   rowPressed: {
     opacity: 0.6,
