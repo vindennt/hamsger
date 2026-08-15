@@ -13,9 +13,9 @@ export const MAX_SKIP: number = cfg.max_skip;
 // evicted first (a dropped skipped key just means that one message stays unreadable).
 export const MAX_SKIP_STORE = 2000;
 
-// TODO: remove. This is for testing
 let skipStoreCap = MAX_SKIP_STORE;
 export function __setSkipStoreCapForTests(n: number | null): void {
+  if (process.env.NODE_ENV !== "test") return;
   skipStoreCap = n ?? MAX_SKIP_STORE;
 }
 

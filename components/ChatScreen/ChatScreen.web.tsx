@@ -7,19 +7,17 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { styles } from "./styles/index.web";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { SessionManager } from "./SessionManager";
-import { ContactSidebar } from "./components/ContactSidebar";
 import { ChatHeader } from "./components/ChatHeader";
-import { MessageList } from "./components/MessageList";
 import { ChatInput } from "./components/ChatInput";
+import { ContactSidebar } from "./components/ContactSidebar";
+import { MessageList } from "./components/MessageList";
+import { styles } from "./styles/index.web";
 
 export default function ChatScreen() {
   const isReady = useChatStore((s) => s.isReady);
   const currentPeer = useChatStore((s) => s.currentPeer);
-
-  console.log("ChatScreen Render", Date.now(), { isReady, currentPeer });
 
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
@@ -56,7 +54,7 @@ export default function ChatScreen() {
   return (
     <View style={styles.root}>
       <SessionManager />
-      
+
       <View style={styles.container}>
         {/* DESKTOP SIDEBAR */}
         {!isMobile && (
@@ -67,7 +65,11 @@ export default function ChatScreen() {
 
         {/* MAIN PANE */}
         <View style={[styles.mainPane, isMobile && { width: "100%" }]}>
-          <ChatHeader styles={styles} isMobile={isMobile} setIsDrawerOpen={setIsDrawerOpen} />
+          <ChatHeader
+            styles={styles}
+            isMobile={isMobile}
+            setIsDrawerOpen={setIsDrawerOpen}
+          />
 
           <MessageList isMobile={isMobile} setIsDrawerOpen={setIsDrawerOpen} />
 
@@ -112,7 +114,11 @@ export default function ChatScreen() {
             ]}
           >
             <View style={{ flex: 1, paddingTop: 16 }}>
-              <ContactSidebar styles={styles} isMobile={true} setIsDrawerOpen={setIsDrawerOpen} />
+              <ContactSidebar
+                styles={styles}
+                isMobile={true}
+                setIsDrawerOpen={setIsDrawerOpen}
+              />
             </View>
           </Animated.View>
         )}
