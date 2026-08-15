@@ -17,6 +17,7 @@ import {
 } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
+import { syncLog } from "../../lib/debug/syncLog";
 import { flushOutbox } from "../../lib/outbox/outbox";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
@@ -43,6 +44,7 @@ export async function resetConversation(): Promise<void> {
     resetConversationRatchet(currentUserId, convId),
   );
   markReset(convId); // start cooldown so the auto-path doesn't immediately re-fire
+  syncLog("reset_local", convId, { reason: "manual" });
   useChatStore
     .getState()
     .addMessage(convId, makeSystemNote(convId, RESET_NOTE_LOCAL));
@@ -103,6 +105,7 @@ export async function sendMessage(inputText: string) {
           return null;
         }
         markReset(activeConversationId);
+        syncLog("reset_unreadable", activeConversationId, {});
         await resetConversationRatchet(currentUserId, activeConversationId);
         await messageRepo
           .logError(
@@ -154,6 +157,14 @@ export async function sendMessage(inputText: string) {
       text: ratchetMsg.ciphertext, // Server never sees plaintext
       ...(prekeyHeader ? { prekey: prekeyHeader } : {}),
     };
+
+    syncLog("send", activeConversationId, {
+      msgId: serverDbMsg.id,
+      n: serverDbMsg.n,
+      pn: serverDbMsg.pn,
+      dh: serverDbMsg.dh_pub?.slice(0, 8),
+      newHandshake: !!prekeyHeader,
+    });
 
     // Durable outbox row BEFORE any network call: an offline/transient send is
     // now retried until delivered instead of being silently dropped.

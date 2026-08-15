@@ -29,6 +29,7 @@ import {
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
 import { outboxRepo } from "../../lib/database/outboxRepository";
+import { syncLog } from "../../lib/debug/syncLog";
 import { useChatStore } from "../../lib/store/useChatStore";
 import { supabase } from "../../lib/supabase";
 import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
@@ -313,9 +314,27 @@ export function SessionManager() {
           isDecrypted: true,
         };
 
+        syncLog("recv_ok", convId, {
+          msgId: msg.id,
+          sender: authSenderId,
+          n: msg.n,
+          pn: msg.pn,
+          dh: msg.dh_pub?.slice(0, 8),
+          prekey: !!msg.prekey,
+        });
+
         addMessage(convId, decryptedMsg);
         clearDecryptFailures(convId); // in sync again
       } catch (e: any) {
+        syncLog("recv_fail", convId, {
+          msgId: msg.id,
+          sender: authSenderId,
+          err: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+          n: msg.n,
+          pn: msg.pn,
+          dh: msg.dh_pub?.slice(0, 8),
+          prekey: !!msg.prekey,
+        });
         console.error(
           `[SessionManager] Decryption failed for message ${msg.id}:`,
           e,
@@ -351,6 +370,9 @@ export function SessionManager() {
         await hydrateCooldown(convId);
         if (shouldReset(convId, { immediate })) {
           markReset(convId);
+          syncLog("reset_auto", convId, {
+            trigger: immediate ? "skip_overflow" : "repeated_fail",
+          });
           await resetConversationRatchet(currentUserId, convId);
           addMessage(convId, makeSystemNote(convId, RESET_NOTE_LOCAL));
           void sendSessionReset(currentUserId, authSenderId);
@@ -409,6 +431,7 @@ export function SessionManager() {
               await hydrateCooldown(convId);
               if (shouldReset(convId, { immediate: true })) {
                 markReset(convId);
+                syncLog("reset_inbound", convId, {});
                 await withRatchetLock(convId, () =>
                   resetConversationRatchet(user.id, convId),
                 );
@@ -464,6 +487,7 @@ export function SessionManager() {
               await hydrateCooldown(convId);
               if (shouldReset(convId, { immediate: true })) {
                 markReset(convId);
+                syncLog("reset_inbound", convId, {});
                 await withRatchetLock(convId, () =>
                   resetConversationRatchet(user.id, convId),
                 );
