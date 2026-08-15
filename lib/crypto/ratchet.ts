@@ -141,8 +141,9 @@ export function initBob(
     skippedKeys: new Map(),
   };
 
-  // Perform a preemptive DH ratchet step using Alice's deterministic initial DH public key
-  // TODO: Need a cleaner way for te first ratchet, more hidden.
+  // Preemptive DH ratchet derives Bob's receiving chain from Alice's ephemeral EK
+  // That EK is also Alice's initial ratchet key, so her first
+  // message's dh_pub must match it which is checked on the receivers path inSessionManager
   const dhOut1 = state.DHs.dh(aliceDHsPubHex);
   const { newRK: rk1, newCK: newCKr } = kdfRootChain(state.RK, dhOut1);
 

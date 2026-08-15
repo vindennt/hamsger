@@ -17,7 +17,6 @@ import { styles } from "./styles/index.web";
 
 export default function ChatScreen() {
   const isReady = useChatStore((s) => s.isReady);
-  const currentPeer = useChatStore((s) => s.currentPeer);
 
   const { width } = useWindowDimensions();
   const isMobile = width < 768;

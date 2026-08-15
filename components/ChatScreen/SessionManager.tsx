@@ -226,6 +226,21 @@ export function SessionManager() {
         return;
       }
       const trustedSender = trustedIdentity.name;
+      // First message's dh_pub must equal prekey.ek. DONT START A SESSION IF THIS DOES NOT PASS
+      if (msg.prekey && msg.prekey.ek !== msg.dh_pub) {
+        console.warn(
+          `[SessionManager] Dropping ${msg.id}: prekey.ek != dh_pub (malformed handshake)`,
+        );
+        await messageRepo
+          .logError(
+            "malformed_handshake",
+            convId,
+            msg.id,
+            "prekey.ek != dh_pub",
+          )
+          .catch(() => {});
+        return;
+      }
 
       try {
         const state = msg.prekey
