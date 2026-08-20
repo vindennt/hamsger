@@ -185,6 +185,14 @@ async function ensureProfileExists(
   }
 }
 
+async function backupExists(userId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("encrypted_backups")
+    .select("user_id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  return !error && !!count && count > 0;
+}
+
 export interface KeyVerificationResult {
   identityKey: string;
   needsPinSetup?: boolean;
@@ -286,6 +294,9 @@ export async function verifyUserKeysExist(
   // install that already holds the shared identity, or a post-reset re-register).
   if (!myBundle) {
     await registerThisDevice(userId, deviceId);
+    if (!(await backupExists(userId))) {
+      return { identityKey: localPub, needsPinSetup: true };
+    }
   }
 
   return { identityKey: localPub };
