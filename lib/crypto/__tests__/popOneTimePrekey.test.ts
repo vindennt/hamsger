@@ -10,6 +10,7 @@ jest.mock("../../supabase", () => ({
 }));
 
 const PEER = "peer-uuid-1234";
+const PEER_DEVICE = "peer-device-5678";
 
 beforeEach(() => mockRpc.mockReset());
 
@@ -19,23 +20,25 @@ describe("popOneTimePrekey", () => {
       data: [{ id: "opk-id-1", public_key: "deadbeef" }],
       error: null,
     });
-    await expect(popOneTimePrekey(PEER)).resolves.toEqual({
+    await expect(popOneTimePrekey(PEER, PEER_DEVICE)).resolves.toEqual({
       id: "opk-id-1",
       publicKey: "deadbeef",
     });
+    // Targets the specific peer device, not just the account.
     expect(mockRpc).toHaveBeenCalledWith("pop_one_time_prekey", {
       target: PEER,
+      target_device: PEER_DEVICE,
     });
   });
 
   it("returns null when the pool is exhausted (empty array)", async () => {
     mockRpc.mockResolvedValue({ data: [], error: null });
-    await expect(popOneTimePrekey(PEER)).resolves.toBeNull();
+    await expect(popOneTimePrekey(PEER, PEER_DEVICE)).resolves.toBeNull();
   });
 
   it("returns null when data is null", async () => {
     mockRpc.mockResolvedValue({ data: null, error: null });
-    await expect(popOneTimePrekey(PEER)).resolves.toBeNull();
+    await expect(popOneTimePrekey(PEER, PEER_DEVICE)).resolves.toBeNull();
   });
 
   it("returns null (not throw) on rpc error", async () => {
@@ -43,6 +46,6 @@ describe("popOneTimePrekey", () => {
       data: null,
       error: { message: "not_friends" },
     });
-    await expect(popOneTimePrekey(PEER)).resolves.toBeNull();
+    await expect(popOneTimePrekey(PEER, PEER_DEVICE)).resolves.toBeNull();
   });
 });

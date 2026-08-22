@@ -97,9 +97,12 @@ export async function establishInitiatorSession(
   userId: string,
   peer: UserIdentity,
 ): Promise<{ state: RatchetState; header: PrekeyHeader }> {
+  // TODO: Make this supportm ultiuple device IDs
   const { data: bundle, error } = await supabase
     .from("prekey_bundles")
-    .select("identity_key, signed_prekey, spk_signature, signing_key")
+    .select(
+      "device_id, identity_key, signed_prekey, spk_signature, signing_key",
+    )
     .eq("user_id", peer.uuid)
     .maybeSingle();
 
@@ -116,7 +119,7 @@ export async function establishInitiatorSession(
     throw new Error(`Invalid signed prekey for ${peer.name}.`);
   }
 
-  const popped = await popOneTimePrekey(peer.uuid);
+  const popped = await popOneTimePrekey(peer.uuid, bundle.device_id);
   const ek = new KeyPair("EK");
 
   const myIkPriv = await keystore.get(`ik_priv_${userId}`);

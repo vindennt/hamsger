@@ -204,14 +204,15 @@ export interface PoppedOneTimePrekey {
   publicKey: string;
 }
 
-// Atomically claims (deletes) one of peerId's one-time prekeys via the
-// friends-only pop_one_time_prekey RPC. Returns null on error or an exhausted
-// pool so the caller can fall back to a no-OPK handshake.
+// Atomically claims (deletes) one of the peer device opks via the
+// friends only pop_one_time_prekey RPC
 export async function popOneTimePrekey(
   peerId: string,
+  peerDeviceId: string,
 ): Promise<PoppedOneTimePrekey | null> {
   const { data, error } = await supabase.rpc("pop_one_time_prekey", {
     target: peerId,
+    target_device: peerDeviceId,
   });
   if (error) {
     // RPC fails

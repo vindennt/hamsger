@@ -8,13 +8,14 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from "../../lib/contacts";
-import { verifyUserKeysExist } from "../../lib/crypto";
+import { getDeviceId, verifyUserKeysExist } from "../../lib/crypto";
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import {
   archiveMessage,
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
+import { refreshDevicePresence } from "../../lib/crypto/prekeyReplenish";
 import { TooManySkippedError } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import {
@@ -135,6 +136,16 @@ export function SessionManager() {
             console.error(
               "[SessionManager] Archive init/backfill failed:",
               archiveErr,
+            ),
+          );
+
+        // Update device's server visibility
+        getDeviceId(userId)
+          .then((deviceId) => refreshDevicePresence(userId, deviceId))
+          .catch((presenceErr) =>
+            console.error(
+              "[SessionManager] Device presence refresh failed:",
+              presenceErr,
             ),
           );
       } catch (err: any) {
