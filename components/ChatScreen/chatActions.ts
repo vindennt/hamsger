@@ -1,4 +1,5 @@
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
+import { getDeviceId } from "../../lib/crypto/deviceId";
 import {
   archiveMessage,
   type ArchiveInput,
@@ -20,8 +21,13 @@ import { outboxRepo } from "../../lib/database/outboxRepository";
 import { syncLog } from "../../lib/debug/syncLog";
 import { flushOutbox } from "../../lib/outbox/outbox";
 import { useChatStore } from "../../lib/store/useChatStore";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
-import { establishInitiatorSession } from "./sessionHelpers";
+import {
+  listRatchetPeerDeviceIds,
+  loadRatchetState,
+  ratchetStateKey,
+  serializeRatchetState,
+} from "./ratchetHelpers";
+import { initSessionsAllDevices } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   makeSystemNote,
@@ -77,6 +83,8 @@ export async function sendMessage(inputText: string) {
 
   const text = inputText.trim();
 
+  const myDeviceId = await getDeviceId(currentUserId);
+
   // Captured inside the ratchet lock (needs the generated msg id), archived
   // outside it so cloud archiving never blocks the next encrypt.
   let archiveInput: ArchiveInput | null = null;
@@ -87,43 +95,59 @@ export async function sendMessage(inputText: string) {
   const enqueued = await withRatchetLock(activeConversationId, async () => {
     let ratchetMsg;
     let prekeyHeader: EncryptedDbMessage["prekey"];
+    let peerDeviceId: string | null = null;
     try {
       let ratchetState: RatchetState | null = null;
-      try {
-        ratchetState = await loadRatchetState(
-          activeConversationId,
-          currentUserId,
-        );
-      } catch (e) {
-        if (!(e instanceof EncryptedStateUnreadableError)) throw e;
-        // Local ratchet state exists but is unreadable  Reset instead of starting a new ratchet so that history is preserved
-        await hydrateCooldown(activeConversationId);
-        if (!shouldReset(activeConversationId, { immediate: true })) {
-          console.warn(
-            `[chatActions] Ratchet state unreadable for ${activeConversationId} but within reset cooldown; send aborted`,
-          );
-          return null;
-        }
-        markReset(activeConversationId);
-        syncLog("reset_unreadable", activeConversationId, {});
-        await resetConversationRatchet(currentUserId, activeConversationId);
-        await messageRepo
-          .logError(
-            "ratchet_reset",
+
+      const existing = await listRatchetPeerDeviceIds(
+        activeConversationId,
+        currentUserId,
+      );
+      if (existing.length > 0) {
+        peerDeviceId = existing[0];
+        try {
+          ratchetState = await loadRatchetState(
             activeConversationId,
-            null,
-            "Local ratchet state unreadable on send; reset and re-handshaked",
-          )
-          .catch(() => {});
-        console.warn(
-          `[chatActions] Ratchet state unreadable for ${activeConversationId}; reset and re-handshaking`,
-        );
+            currentUserId,
+            peerDeviceId,
+          );
+        } catch (e) {
+          if (!(e instanceof EncryptedStateUnreadableError)) throw e;
+          // Local ratchet state exists but is unreadable  Reset instead of starting a new ratchet so that history is preserved
+          await hydrateCooldown(activeConversationId);
+          if (!shouldReset(activeConversationId, { immediate: true })) {
+            console.warn(
+              `[chatActions] Ratchet state unreadable for ${activeConversationId} but within reset cooldown; send aborted`,
+            );
+            return null;
+          }
+          markReset(activeConversationId);
+          syncLog("reset_unreadable", activeConversationId, {});
+          await resetConversationRatchet(currentUserId, activeConversationId);
+          await messageRepo
+            .logError(
+              "ratchet_reset",
+              activeConversationId,
+              null,
+              "Local ratchet state unreadable on send; reset and re-handshaked",
+            )
+            .catch(() => {});
+          console.warn(
+            `[chatActions] Ratchet state unreadable for ${activeConversationId}; reset and re-handshaking`,
+          );
+          // reset cleared the device-pair state
+          ratchetState = null;
+          peerDeviceId = null;
+        }
       }
+
       if (!ratchetState) {
-        const established = await establishInitiatorSession(
+        const sessions = await initSessionsAllDevices(
           currentUserId,
           recipientIdentity,
         );
+        const [devId, established] = [...sessions.entries()][0];
+        peerDeviceId = devId;
         ratchetState = established.state;
         prekeyHeader = established.header;
       }
@@ -131,7 +155,7 @@ export async function sendMessage(inputText: string) {
 
       // Save updated ratchet state
       await saveEncryptedState(
-        `ratchetState_v3_${currentUserId}_${activeConversationId}`,
+        ratchetStateKey(currentUserId, activeConversationId, peerDeviceId!),
         JSON.stringify(serializeRatchetState(ratchetState)),
       );
     } catch (e: any) {
@@ -155,6 +179,8 @@ export async function sendMessage(inputText: string) {
       n: ratchetMsg.header.N,
       timestamp: new Date().toISOString(),
       text: ratchetMsg.ciphertext, // Server never sees plaintext
+      sender_device_id: myDeviceId,
+      recipient_device_id: peerDeviceId!,
       ...(prekeyHeader ? { prekey: prekeyHeader } : {}),
     };
 

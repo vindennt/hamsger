@@ -2,6 +2,7 @@ import {
   createInitiatorSession,
   createResponderSession,
 } from "../../lib/crypto/createSession";
+import { getDeviceId } from "../../lib/crypto/deviceId";
 import { keystore } from "../../lib/crypto/keystore";
 import { popOneTimePrekey } from "../../lib/crypto/onboarding";
 import { RatchetState } from "../../lib/crypto/ratchet";
@@ -12,8 +13,8 @@ import { PrekeyHeader, UserIdentity } from "./types";
 /**
  * Loads the contact list from the database and fetches their identity keys.
  * Session setup is lazy: it happens on first send (initiator) or first
- * receive-with-prekey-header (responder), see establishInitiatorSession /
- * establishResponderSession below.
+ * receive-with-prekey-header (responder), see
+ * initSessionsAllDevices / establishResponderSession below.
  */
 export async function loadContacts(
   userId: string,
@@ -87,61 +88,82 @@ export async function loadContacts(
   return { resolvedContacts, newIdentities };
 }
 
+export interface InitiatorSession {
+  state: RatchetState;
+  header: PrekeyHeader;
+}
+
 /**
  * Initiator "Alice" side of the lazy handshake, run on first send to a peer:
- * fetches + verifies the peer's published prekey bundle, pops a one-time
- * prekey, and runs X3DH with a fresh ephemeral. Returns the bootstrapped
- * ratchet state plus the prekey header to attach to the first message.
+ * fetches ALL of the peer's device prekeys, verifies each SPK against the peer's SHARED signing key
+ *  Every device pops the device OPK runs X3DH with a fresh EK. Returns one bootstrapped
+ * ratchet + prekey header per peer device, keyed by the peer's device id.
+ *
+ * Header ik is the shared account identity key
+ * sender_device_id is curr device
  */
-export async function establishInitiatorSession(
+export async function initSessionsAllDevices(
   userId: string,
   peer: UserIdentity,
-): Promise<{ state: RatchetState; header: PrekeyHeader }> {
-  // TODO: Make this supportm ultiuple device IDs
-  const { data: bundle, error } = await supabase
-    .from("prekey_bundles")
-    .select(
-      "device_id, identity_key, signed_prekey, spk_signature, signing_key",
-    )
-    .eq("user_id", peer.uuid)
-    .maybeSingle();
-
-  if (error || !bundle?.identity_key || !bundle.signing_key) {
-    throw new Error(`Missing encryption keys for ${peer.name}.`);
-  }
-
-  const valid = verifySignedPrekey(
-    bundle.signing_key,
-    bundle.signed_prekey,
-    bundle.spk_signature,
-  );
-  if (!valid) {
-    throw new Error(`Invalid signed prekey for ${peer.name}.`);
-  }
-
-  const popped = await popOneTimePrekey(peer.uuid, bundle.device_id);
-  const ek = new KeyPair("EK");
-
+): Promise<Map<string, InitiatorSession>> {
+  const myDeviceId = await getDeviceId(userId);
   const myIkPriv = await keystore.get(`ik_priv_${userId}`);
   if (!myIkPriv) {
     throw new Error("Missing local identity key.");
   }
   const myIk = new KeyPair("IK", myIkPriv);
 
-  const { state } = createInitiatorSession(myIkPriv, ek, {
-    identityKey: bundle.identity_key,
-    signedPrekey: bundle.signed_prekey,
-    oneTimePrekey: popped?.publicKey ?? null,
-  });
+  const { data: bundles, error } = await supabase
+    .from("prekey_bundles")
+    .select(
+      "device_id, identity_key, signed_prekey, spk_signature, signing_key",
+    )
+    .eq("user_id", peer.uuid);
 
-  return {
-    state,
-    header: {
-      ik: myIk.publicKey,
-      ek: ek.publicKey,
-      opk: popped?.publicKey ?? null,
-    },
-  };
+  if (error || !bundles || bundles.length === 0) {
+    throw new Error(`Missing encryption keys for ${peer.name}.`);
+  }
+
+  const sessions = new Map<string, InitiatorSession>();
+  for (const bundle of bundles) {
+    if (!bundle.identity_key || !bundle.signing_key) continue;
+
+    const valid = verifySignedPrekey(
+      bundle.signing_key,
+      bundle.signed_prekey,
+      bundle.spk_signature,
+    );
+    if (!valid) {
+      console.warn(
+        `[sessionHelpers] Invalid signed prekey for ${peer.name} device ${bundle.device_id}; skipping.`,
+      );
+      continue;
+    }
+
+    const popped = await popOneTimePrekey(peer.uuid, bundle.device_id);
+    const ek = new KeyPair("EK");
+
+    const { state } = createInitiatorSession(myIkPriv, ek, {
+      identityKey: bundle.identity_key,
+      signedPrekey: bundle.signed_prekey,
+      oneTimePrekey: popped?.publicKey ?? null,
+    });
+
+    sessions.set(bundle.device_id, {
+      state,
+      header: {
+        ik: myIk.publicKey,
+        ek: ek.publicKey,
+        opk: popped?.publicKey ?? null,
+        sender_device_id: myDeviceId,
+      },
+    });
+  }
+
+  if (sessions.size === 0) {
+    throw new Error(`Missing encryption keys for ${peer.name}.`);
+  }
+  return sessions;
 }
 
 /**

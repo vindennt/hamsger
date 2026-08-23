@@ -90,12 +90,19 @@ export function markReset(convId: string): void {
  * Delete the stored ratchet state so the next ratchet op re-inits from the
  * deterministic session. LOCK-FREE: the caller must already hold
  * withRatchetLock(convId) (the receive path does; the manual path wraps it).
+ *
+ * One ratchet per convo per device
  */
 export async function resetConversationRatchet(
   userId: string,
   convId: string,
 ): Promise<void> {
-  await kv.remove(`ratchetState_v3_${userId}_${convId}`);
+  const prefix = `ratchetState_v3_${userId}_${convId}_`;
+  const rows = await kv.getAllByPrefix(prefix);
+  // _ is single char wildcard
+  for (const { key } of rows) {
+    if (key.startsWith(prefix)) await kv.remove(key);
+  }
 }
 
 /** Test-only: clear the in-memory recovery bookkeeping. */
