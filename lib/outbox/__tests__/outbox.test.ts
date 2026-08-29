@@ -1,6 +1,6 @@
 import { outboxRepo, OutboxRow } from "../../database/outboxRepository";
-import { supabase } from "../../supabase";
 import { useChatStore } from "../../store/useChatStore";
+import { supabase } from "../../supabase";
 import { backoffMs, flushOutbox, retrySend } from "../outbox";
 
 jest.mock("../../supabase", () => ({ supabase: { from: jest.fn() } }));
@@ -11,6 +11,7 @@ jest.mock("../../database/outboxRepository", () => ({
     bumpAttempt: jest.fn(),
     markFailed: jest.fn(),
     retry: jest.fn(),
+    getBaseStatus: jest.fn(),
   },
 }));
 jest.mock("../../store/useChatStore", () => ({
@@ -26,9 +27,11 @@ let rows: OutboxRow[] = [];
 function makeRow(over: Partial<OutboxRow> = {}): OutboxRow {
   return {
     msg_id: "m1",
+    base_msg_id: null,
     conversation_id: "conv",
     sender_id: "s",
     recipient_id: "r",
+    recipient_device_id: null,
     payload: JSON.stringify({ id: over.msg_id ?? "m1" }),
     status: "pending",
     attempts: 0,
@@ -54,25 +57,40 @@ beforeEach(() => {
   (outboxRepo.markSent as jest.Mock).mockImplementation(async (id: string) => {
     rows = rows.filter((r) => r.msg_id !== id);
   });
-  (outboxRepo.bumpAttempt as jest.Mock).mockImplementation(async (id: string) => {
-    const r = rows.find((x) => x.msg_id === id);
-    if (r) {
-      r.attempts += 1;
-      r.last_attempt_at = new Date().toISOString();
+  (outboxRepo.bumpAttempt as jest.Mock).mockImplementation(
+    async (id: string) => {
+      const r = rows.find((x) => x.msg_id === id);
+      if (r) {
+        r.attempts += 1;
+        r.last_attempt_at = new Date().toISOString();
+      }
+    },
+  );
+  (outboxRepo.markFailed as jest.Mock).mockImplementation(
+    async (id: string) => {
+      const r = rows.find((x) => x.msg_id === id);
+      if (r) r.status = "failed";
+    },
+  );
+  (outboxRepo.retry as jest.Mock).mockImplementation(async (base: string) => {
+    for (const r of rows) {
+      if (r.base_msg_id === base || r.msg_id === base) {
+        r.status = "pending";
+        r.attempts = 0;
+        r.last_attempt_at = null;
+      }
     }
   });
-  (outboxRepo.markFailed as jest.Mock).mockImplementation(async (id: string) => {
-    const r = rows.find((x) => x.msg_id === id);
-    if (r) r.status = "failed";
-  });
-  (outboxRepo.retry as jest.Mock).mockImplementation(async (id: string) => {
-    const r = rows.find((x) => x.msg_id === id);
-    if (r) {
-      r.status = "pending";
-      r.attempts = 0;
-      r.last_attempt_at = null;
-    }
-  });
+  (outboxRepo.getBaseStatus as jest.Mock).mockImplementation(
+    async (base: string) => {
+      const group = rows.filter(
+        (r) => r.base_msg_id === base || r.msg_id === base,
+      );
+      if (group.some((r) => r.status === "failed")) return "failed";
+      if (group.some((r) => r.status === "pending")) return "pending";
+      return null;
+    },
+  );
 });
 
 describe("backoffMs", () => {
@@ -179,5 +197,102 @@ describe("retrySend", () => {
     expect(updateMessageStatus).toHaveBeenCalledWith("conv", "m1", "pending");
     expect(mockInsert).toHaveBeenCalledTimes(1);
     expect(rows).toHaveLength(0); // delivered
+  });
+});
+
+describe("fan-out (per-device rows)", () => {
+  // One logical message "m" fanned out to peer devices d1 + d2.
+  function fanRows() {
+    return [
+      makeRow({ msg_id: "m__d1", base_msg_id: "m", recipient_device_id: "d1" }),
+      makeRow({ msg_id: "m__d2", base_msg_id: "m", recipient_device_id: "d2" }),
+    ];
+  }
+  // Fail delivery only for a given device, deterministically (lanes race).
+  function failDevice(deviceId: string) {
+    mockInsert.mockImplementation(async (arg: any) =>
+      arg.recipient_device_id === deviceId
+        ? { error: { code: "08006" } }
+        : { error: null },
+    );
+  }
+
+  it("routes each row to its recipient device", async () => {
+    rows = fanRows();
+    await flushOutbox();
+    const devices = mockInsert.mock.calls.map((c) => c[0].recipient_device_id);
+    expect(devices.sort()).toEqual(["d1", "d2"]);
+  });
+
+  it("marks the bubble 'sent' only once every device row delivers", async () => {
+    rows = fanRows();
+    failDevice("d2"); // d1 delivers, d2 keeps failing
+
+    await flushOutbox();
+
+    // d1 gone, d2 still queued → the bubble must NOT be reported sent yet.
+    expect(updateMessageStatus).not.toHaveBeenCalledWith("conv", "m", "sent");
+    expect(updateMessageStatus).toHaveBeenCalledWith("conv", "m", "pending");
+    expect(rows.map((r) => r.msg_id)).toEqual(["m__d2"]);
+  });
+
+  it("reports 'sent' when all device rows have delivered", async () => {
+    rows = fanRows();
+    await flushOutbox();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith("conv", "m", "sent");
+    expect(rows).toHaveLength(0);
+  });
+
+  it("reports 'failed' when any device row permanently fails", async () => {
+    rows = [
+      makeRow({ msg_id: "m__d1", base_msg_id: "m", recipient_device_id: "d1" }),
+      makeRow({
+        msg_id: "m__d2",
+        base_msg_id: "m",
+        recipient_device_id: "d2",
+        attempts: 9, // next failure hits the cap
+      }),
+    ];
+    failDevice("d2");
+
+    await flushOutbox();
+
+    expect(updateMessageStatus).toHaveBeenCalledWith("conv", "m", "failed");
+  });
+
+  it("a stuck device does not block a sibling device in the same conversation", async () => {
+    rows = fanRows();
+    failDevice("d1");
+
+    await flushOutbox();
+
+    // Both lanes attempted; d2 delivered even though d1 is stuck.
+    expect(mockInsert).toHaveBeenCalledTimes(2);
+    expect(rows.map((r) => r.msg_id)).toEqual(["m__d1"]);
+  });
+
+  it("retrySend re-arms every device row of the message", async () => {
+    rows = [
+      makeRow({
+        msg_id: "m__d1",
+        base_msg_id: "m",
+        recipient_device_id: "d1",
+        status: "failed",
+        attempts: 10,
+      }),
+      makeRow({
+        msg_id: "m__d2",
+        base_msg_id: "m",
+        recipient_device_id: "d2",
+        status: "failed",
+        attempts: 10,
+      }),
+    ];
+
+    await retrySend("conv", "m");
+
+    expect(outboxRepo.retry).toHaveBeenCalledWith("m");
+    expect(rows).toHaveLength(0); // both re-armed and delivered
   });
 });

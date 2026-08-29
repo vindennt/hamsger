@@ -2,9 +2,9 @@
 // conversation at a time IN ORDER (keeps message `n` monotonic), retries with
 // exponential backoff, and gives up after MAX_ATTEMPTS (surfaced as tap-to-retry).
 // See docs/impl/p2-reliability-outbox.md.
-import { supabase } from "../supabase";
 import { outboxRepo, OutboxRow } from "../database/outboxRepository";
 import { useChatStore } from "../store/useChatStore";
+import { supabase } from "../supabase";
 
 const MAX_ATTEMPTS = 10;
 
@@ -27,22 +27,32 @@ function setStatus(
  * Network errors and rate_limit_exceeded (P1d) are retryable — back off.
  */
 async function deliver(row: OutboxRow): Promise<boolean> {
+  const payload = JSON.parse(row.payload);
   const { error } = await supabase.from("message_queue").insert({
     sender_id: row.sender_id,
     recipient_id: row.recipient_id,
-    payload: JSON.parse(row.payload),
+    recipient_device_id: row.recipient_device_id ?? payload.recipient_device_id,
+    payload,
   });
+
+  // The logical message maps to N device rows; reflect the AGGREGATE onto the
+  // single chat bubble (sent only once every device row has delivered).
+  const base = row.base_msg_id ?? row.msg_id;
+  const reflect = async () => {
+    const status = await outboxRepo.getBaseStatus(base);
+    setStatus(row.conversation_id, base, status ?? "sent");
+  };
 
   if (!error || (error as any).code === "23505") {
     await outboxRepo.markSent(row.msg_id);
-    setStatus(row.conversation_id, row.msg_id, "sent");
+    await reflect();
     return true;
   }
 
   await outboxRepo.bumpAttempt(row.msg_id);
   if (row.attempts + 1 >= MAX_ATTEMPTS) {
     await outboxRepo.markFailed(row.msg_id);
-    setStatus(row.conversation_id, row.msg_id, "failed");
+    await reflect();
   }
   return false;
 }
@@ -56,15 +66,16 @@ async function flushOnce(): Promise<void> {
   const pending = await outboxRepo.getPending();
   if (pending.length === 0) return;
 
-  const byConv = new Map<string, OutboxRow[]>();
+  const byLane = new Map<string, OutboxRow[]>();
   for (const r of pending) {
-    const list = byConv.get(r.conversation_id) ?? [];
+    const lane = `${r.conversation_id}::${r.recipient_device_id ?? ""}`;
+    const list = byLane.get(lane) ?? [];
     list.push(r);
-    byConv.set(r.conversation_id, list);
+    byLane.set(lane, list);
   }
 
   await Promise.all(
-    [...byConv.values()].map(async (rows) => {
+    [...byLane.values()].map(async (rows) => {
       for (const row of rows) {
         // Respect per-row backoff; stop this conversation so order is preserved.
         if (row.last_attempt_at) {

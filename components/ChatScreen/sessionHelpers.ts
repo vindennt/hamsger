@@ -105,7 +105,9 @@ export interface InitiatorSession {
 export async function initSessionsAllDevices(
   userId: string,
   peer: UserIdentity,
+  opts?: { skipDeviceIds?: Set<string> },
 ): Promise<Map<string, InitiatorSession>> {
+  const skip = opts?.skipDeviceIds ?? new Set<string>();
   const myDeviceId = await getDeviceId(userId);
   const myIkPriv = await keystore.get(`ik_priv_${userId}`);
   if (!myIkPriv) {
@@ -125,6 +127,10 @@ export async function initSessionsAllDevices(
   }
 
   const sessions = new Map<string, InitiatorSession>();
+  // Tracks whether ANY published device has usable keys, so we can distinguish
+  // "peer keys are broken" (throw) from "every device already has a session"
+  // (return empty — a valid steady state when fanning out to known devices).
+  let sawUsableDevice = false;
   for (const bundle of bundles) {
     if (!bundle.identity_key || !bundle.signing_key) continue;
 
@@ -139,6 +145,10 @@ export async function initSessionsAllDevices(
       );
       continue;
     }
+    sawUsableDevice = true;
+    // Don't re-handshake a device we already hold a session for — that would
+    // fork the ratchet. The caller loads those existing sessions itself.
+    if (skip.has(bundle.device_id)) continue;
 
     const popped = await popOneTimePrekey(peer.uuid, bundle.device_id);
     const ek = new KeyPair("EK");
@@ -160,7 +170,7 @@ export async function initSessionsAllDevices(
     });
   }
 
-  if (sessions.size === 0) {
+  if (!sawUsableDevice) {
     throw new Error(`Missing encryption keys for ${peer.name}.`);
   }
   return sessions;

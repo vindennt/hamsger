@@ -154,4 +154,33 @@ describe("establishInitiatorSessionsForAllDevices", () => {
       /Missing encryption keys/,
     );
   });
+
+  it("skips devices we already hold a session for (no re-handshake)", async () => {
+    const sigKP = new SigningKeyPair();
+    const ikB = new KeyPair("IK");
+    const d1 = makePeerDevice("bob-dev-A", sigKP, ikB);
+    const d2 = makePeerDevice("bob-dev-B", sigKP, ikB);
+    mockBundles([d1.row, d2.row]);
+
+    const sessions = await initSessionsAllDevices(USER, peer, {
+      skipDeviceIds: new Set(["bob-dev-A"]),
+    });
+
+    expect([...sessions.keys()]).toEqual(["bob-dev-B"]);
+    // No OPK popped for the skipped device.
+    expect(mockPop).not.toHaveBeenCalledWith(peer.uuid, "bob-dev-A");
+  });
+
+  it("returns an empty map (no throw) when every valid device is skipped", async () => {
+    const sigKP = new SigningKeyPair();
+    const ikB = new KeyPair("IK");
+    const d1 = makePeerDevice("bob-dev-A", sigKP, ikB);
+    mockBundles([d1.row]);
+
+    const sessions = await initSessionsAllDevices(USER, peer, {
+      skipDeviceIds: new Set(["bob-dev-A"]),
+    });
+
+    expect(sessions.size).toBe(0);
+  });
 });

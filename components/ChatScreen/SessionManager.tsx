@@ -396,10 +396,14 @@ export function SessionManager() {
 
     const fetchInitialMessages = async () => {
       try {
+        const myDeviceId = await getDeviceId(user.id);
         const { data, error } = await supabase
           .from("message_queue")
           .select("*")
           .eq("recipient_id", user.id)
+          .or(
+            `recipient_device_id.eq.${myDeviceId},recipient_device_id.is.null`,
+          )
           .order("created_at", { ascending: true });
 
         if (error) throw error;
@@ -461,6 +465,14 @@ export function SessionManager() {
           const newRow = payload.new as any;
           if (newRow && newRow.payload) {
             if (newRow.recipient_id !== user.id) return;
+            // Skip (do NOT delete) rows for a sibling device — that device drains
+            // and deletes its own. Null-targeted (pre-fan-out) rows still process.
+            const myDeviceId = await getDeviceId(user.id);
+            if (
+              newRow.recipient_device_id &&
+              newRow.recipient_device_id !== myDeviceId
+            )
+              return;
 
             const newMsg = newRow.payload as EncryptedDbMessage;
             const convId = makeConversationId(user.id, newRow.sender_id);
