@@ -9,6 +9,11 @@ import {
   sendFriendRequest,
 } from "../../lib/contacts";
 import { getDeviceId, verifyUserKeysExist } from "../../lib/crypto";
+import {
+  ArchiveSyncInsert,
+  drainArchive,
+  subscribeArchive,
+} from "../../lib/crypto/archiveSync";
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import {
   archiveMessage,
@@ -517,6 +522,41 @@ export function SessionManager() {
     // Keep user?.id and not user. Supabase token refresh means user is diff even if its same id, which re-triggers subscription  and can cause double decrypts
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isReady, decryptAndAddMessage]);
+
+  // Sync to outbound messages sent from user's other devices
+  useEffect(() => {
+    if (!user || !isReady) return;
+
+    const onInsert = (insert: ArchiveSyncInsert) => {
+      const msg = {
+        id: insert.msgId,
+        conversation_id: insert.convId,
+        sender: insert.sender,
+        timestamp: insert.created_at_server,
+        ciphertext: "",
+        iv: "",
+        auth_tag: "",
+        dh_pub: "",
+        pn: 0,
+        n: 0,
+        text: insert.text,
+        isDecrypted: true,
+      } as EncryptedDbMessage;
+      useChatStore.getState().addMessage(insert.convId, msg);
+    };
+
+    drainArchive(user.id, onInsert).catch((err) =>
+      console.error("[SessionManager] Archive drain failed:", err),
+    );
+
+    const channel = subscribeArchive(user.id, onInsert);
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // user?.id rather than user avoids a reload
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isReady]);
 
   return null; // Headless component
 }
