@@ -45,7 +45,12 @@ import {
   makeSystemNote,
   sendSessionReset,
 } from "./sessionReset";
-import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
+import {
+  EncryptedDbMessage,
+  UserIdentity,
+  baseMessageId,
+  makeConversationId,
+} from "./types";
 import { useBackupAutoRefresh } from "./useBackupAutoRefresh";
 import { useOutbox } from "./useOutbox";
 import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
@@ -416,6 +421,7 @@ export function SessionManager() {
         if (data && data.length > 0) {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
+            payload.id = baseMessageId(payload.id);
             const convId = makeConversationId(user.id, row.sender_id);
             if (payload.type === SESSION_RESET_TYPE) {
               // Block unlimited rewinds in case of malicious actor
@@ -480,6 +486,7 @@ export function SessionManager() {
               return;
 
             const newMsg = newRow.payload as EncryptedDbMessage;
+            newMsg.id = baseMessageId(newMsg.id);
             const convId = makeConversationId(user.id, newRow.sender_id);
             if (newMsg.type === SESSION_RESET_TYPE) {
               // Block unlimited rewinds in case of malicious actor

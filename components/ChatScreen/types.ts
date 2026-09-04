@@ -16,6 +16,14 @@ export function makeConversationId(
   return [uuid1, uuid2].sort().join(":");
 }
 
+// Multi device message creates transport Ids like
+// `${baseMsgId}__${recipientDeviceId}`
+// Strip device ID to avoid message archive treating it as 2 separte ones
+export function baseMessageId(id: string): string {
+  const i = id.indexOf("__");
+  return i === -1 ? id : id.slice(0, i);
+}
+
 // Delivery state for messages WE send (durable outbox, see lib/outbox).
 // Received messages leave this undefined.
 export type SendStatus = "pending" | "sent" | "failed";
