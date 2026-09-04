@@ -56,6 +56,8 @@ import { EncryptedDbMessage } from "../types";
 const noop = () => {};
 const CONV = "alice:bob";
 const BOB = "bob-user-id";
+// Alice's device, as seen from Bob's side (the peer device id keying the ratchet).
+const ALICE_DEV = "alice-device-1";
 
 // Fresh Alice(initiator)/Bob(responder) pair; Bob is seeded into the mocked
 // at-rest store so the receive core loads it via loadRatchetState.
@@ -77,7 +79,7 @@ function seedPair(): RatchetState {
   ).state;
 
   mockStore.set(
-    `ratchetState_v3_${BOB}_${CONV}`,
+    `ratchetState_v3_${BOB}_${CONV}_${ALICE_DEV}`,
     JSON.stringify(serializeRatchetState(bob)),
   );
   return alice;
@@ -99,6 +101,7 @@ async function makeInbound(
     pn: rm.header.PN,
     n: rm.header.N,
     timestamp: new Date().toISOString(),
+    sender_device_id: ALICE_DEV,
   } as unknown as EncryptedDbMessage;
 }
 
@@ -137,7 +140,9 @@ describe("decryptStoreInbound idempotency", () => {
     expect(messageRepo.insertMessage).toHaveBeenCalledTimes(1);
 
     // Ratchet advanced exactly once (Nr === 1), not double-advanced.
-    const saved = JSON.parse(mockStore.get(`ratchetState_v3_${BOB}_${CONV}`)!);
+    const saved = JSON.parse(
+      mockStore.get(`ratchetState_v3_${BOB}_${CONV}_${ALICE_DEV}`)!,
+    );
     expect(saved.Nr).toBe(1);
   });
 

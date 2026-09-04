@@ -18,6 +18,7 @@ jest.mock("../../database/kv", () => ({
     remove: jest.fn().mockResolvedValue(undefined),
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue(undefined),
+    getAllByPrefix: jest.fn().mockResolvedValue([]),
   },
 }));
 
@@ -61,9 +62,16 @@ describe("recovery decision logic", () => {
     }
   });
 
-  it("resetConversationRatchet deletes the conversation's ratchet state row", async () => {
+  it("resetConversationRatchet deletes every per-device ratchet state for the conversation", async () => {
+    const prefix = "ratchetState_v3_user-1_a:b_";
+    (kv.getAllByPrefix as jest.Mock).mockResolvedValueOnce([
+      { key: `${prefix}dev-A`, value: "x" },
+      { key: `${prefix}dev-B`, value: "y" },
+    ]);
     await resetConversationRatchet("user-1", "a:b");
-    expect(kv.remove).toHaveBeenCalledWith("ratchetState_v3_user-1_a:b");
+    expect(kv.getAllByPrefix).toHaveBeenCalledWith(prefix);
+    expect(kv.remove).toHaveBeenCalledWith(`${prefix}dev-A`);
+    expect(kv.remove).toHaveBeenCalledWith(`${prefix}dev-B`);
   });
 
   it("cooldown persists across a reload via hydrateCooldown", async () => {

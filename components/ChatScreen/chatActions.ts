@@ -1,4 +1,5 @@
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
+import { getDeviceId } from "../../lib/crypto/deviceId";
 import {
   archiveMessage,
   type ArchiveInput,
@@ -20,14 +21,66 @@ import { outboxRepo } from "../../lib/database/outboxRepository";
 import { syncLog } from "../../lib/debug/syncLog";
 import { flushOutbox } from "../../lib/outbox/outbox";
 import { useChatStore } from "../../lib/store/useChatStore";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
-import { establishInitiatorSession } from "./sessionHelpers";
+import {
+  listRatchetPeerDeviceIds,
+  loadRatchetState,
+  ratchetStateKey,
+  serializeRatchetState,
+} from "./ratchetHelpers";
+import { initSessionsAllDevices } from "./sessionHelpers";
 import {
   RESET_NOTE_LOCAL,
   makeSystemNote,
   sendSessionReset,
 } from "./sessionReset";
-import { EncryptedDbMessage, makeConversationId } from "./types";
+import {
+  EncryptedDbMessage,
+  PrekeyHeader,
+  UserIdentity,
+  makeConversationId,
+} from "./types";
+
+// Target device
+// either has ratchet or handshake header
+type SendTarget = {
+  peerDeviceId: string;
+  state: RatchetState;
+  header?: PrekeyHeader;
+};
+
+async function collectSendTargets(
+  userId: string,
+  convId: string,
+  peer: UserIdentity,
+  opts?: { forceHandshakeAll?: boolean },
+): Promise<SendTarget[]> {
+  const existing = opts?.forceHandshakeAll
+    ? []
+    : await listRatchetPeerDeviceIds(convId, userId);
+
+  const targets: SendTarget[] = [];
+  for (const peerDeviceId of existing) {
+    const state = await loadRatchetState(convId, userId, peerDeviceId);
+    if (state) targets.push({ peerDeviceId, state });
+  }
+
+  try {
+    const fresh = await initSessionsAllDevices(userId, peer, {
+      skipDeviceIds: new Set(existing),
+    });
+    for (const [peerDeviceId, est] of fresh) {
+      targets.push({ peerDeviceId, state: est.state, header: est.header });
+    }
+  } catch (e) {
+    // if offline, continue as normal
+    if (targets.length === 0) throw e;
+    console.warn(
+      `[chatActions] Peer device discovery failed for ${convId}; sending to known devices only.`,
+      e,
+    );
+  }
+  return targets;
+}
 
 /**
  * Manual "Reset session" for the active conversation: wipe local ratchet state so
@@ -77,6 +130,8 @@ export async function sendMessage(inputText: string) {
 
   const text = inputText.trim();
 
+  const myDeviceId = await getDeviceId(currentUserId);
+
   // Captured inside the ratchet lock (needs the generated msg id), archived
   // outside it so cloud archiving never blocks the next encrypt.
   let archiveInput: ArchiveInput | null = null;
@@ -85,18 +140,23 @@ export async function sendMessage(inputText: string) {
   // concurrent sends get a monotonically increasing counter `n` (fixes the
   // "out of sequence" bug). The lock is shared with the receive path.
   const enqueued = await withRatchetLock(activeConversationId, async () => {
-    let ratchetMsg;
-    let prekeyHeader: EncryptedDbMessage["prekey"];
+    // retries are device independent
+    const baseMsgId = `msg_new_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 6)}`;
+
+    // 1. Resolve the peer devices to deliver to (fan-out).
+    let targets: SendTarget[];
     try {
-      let ratchetState: RatchetState | null = null;
-      try {
-        ratchetState = await loadRatchetState(
-          activeConversationId,
-          currentUserId,
-        );
-      } catch (e) {
-        if (!(e instanceof EncryptedStateUnreadableError)) throw e;
-        // Local ratchet state exists but is unreadable  Reset instead of starting a new ratchet so that history is preserved
+      targets = await collectSendTargets(
+        currentUserId,
+        activeConversationId,
+        recipientIdentity,
+      );
+    } catch (e) {
+      if (e instanceof EncryptedStateUnreadableError) {
+        // A known device's ratchet state is unreadable. History can't be kept;
+        // reset (cooldown-gated) and re-handshake every device from scratch.
         await hydrateCooldown(activeConversationId);
         if (!shouldReset(activeConversationId, { immediate: true })) {
           console.warn(
@@ -115,80 +175,107 @@ export async function sendMessage(inputText: string) {
             "Local ratchet state unreadable on send; reset and re-handshaked",
           )
           .catch(() => {});
-        console.warn(
-          `[chatActions] Ratchet state unreadable for ${activeConversationId}; reset and re-handshaking`,
-        );
+        try {
+          targets = await collectSendTargets(
+            currentUserId,
+            activeConversationId,
+            recipientIdentity,
+            { forceHandshakeAll: true },
+          );
+        } catch (e2) {
+          console.error("Encryption Ratchet Error:", e2);
+          return null;
+        }
+      } else {
+        console.error("Encryption Ratchet Error:", e);
+        return null;
       }
-      if (!ratchetState) {
-        const established = await establishInitiatorSession(
-          currentUserId,
-          recipientIdentity,
-        );
-        ratchetState = established.state;
-        prekeyHeader = established.header;
-      }
-      ratchetMsg = await ratchetEncrypt(ratchetState, text, () => {});
-
-      // Save updated ratchet state
-      await saveEncryptedState(
-        `ratchetState_v3_${currentUserId}_${activeConversationId}`,
-        JSON.stringify(serializeRatchetState(ratchetState)),
-      );
-    } catch (e: any) {
-      console.error("Encryption Ratchet Error:", e);
-      return null;
     }
 
-    if (!ratchetMsg) return null;
+    if (targets.length === 0) return null;
 
-    // Encrypted DB message payload for the server. Fixed at send time and
-    // persisted verbatim in the outbox — a retry never re-runs the ratchet.
-    const serverDbMsg: EncryptedDbMessage = {
-      id: `msg_new_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      conversation_id: activeConversationId,
-      sender: currentUser,
-      ciphertext: ratchetMsg.ciphertext,
-      iv: ratchetMsg.iv,
-      auth_tag: ratchetMsg.authTag,
-      dh_pub: ratchetMsg.header.DHpub,
-      pn: ratchetMsg.header.PN,
-      n: ratchetMsg.header.N,
-      timestamp: new Date().toISOString(),
-      text: ratchetMsg.ciphertext, // Server never sees plaintext
-      ...(prekeyHeader ? { prekey: prekeyHeader } : {}),
-    };
+    // 2. Encrypt once per device (each device-pair is an independent ratchet)
+    //    and build the per-device server payload + composite outbox id.
+    const timestamp = new Date().toISOString();
+    const perDevice: {
+      serverDbMsg: EncryptedDbMessage;
+      peerDeviceId: string;
+    }[] = [];
+    for (const t of targets) {
+      let ratchetMsg;
+      try {
+        ratchetMsg = await ratchetEncrypt(t.state, text, () => {});
+        await saveEncryptedState(
+          ratchetStateKey(currentUserId, activeConversationId, t.peerDeviceId),
+          JSON.stringify(serializeRatchetState(t.state)),
+        );
+      } catch (e) {
+        // One device failing (e.g. its OPK pop) must not block the others.
+        console.error(
+          `[chatActions] Encrypt failed for device ${t.peerDeviceId}:`,
+          e,
+        );
+        continue;
+      }
+      perDevice.push({
+        peerDeviceId: t.peerDeviceId,
+        serverDbMsg: {
+          id: `${baseMsgId}__${t.peerDeviceId}`,
+          conversation_id: activeConversationId,
+          sender: currentUser,
+          ciphertext: ratchetMsg.ciphertext,
+          iv: ratchetMsg.iv,
+          auth_tag: ratchetMsg.authTag,
+          dh_pub: ratchetMsg.header.DHpub,
+          pn: ratchetMsg.header.PN,
+          n: ratchetMsg.header.N,
+          timestamp,
+          text: ratchetMsg.ciphertext, // Server never sees plaintext
+          sender_device_id: myDeviceId,
+          recipient_device_id: t.peerDeviceId,
+          ...(t.header ? { prekey: t.header } : {}),
+        },
+      });
+    }
+
+    if (perDevice.length === 0) return null;
 
     syncLog("send", activeConversationId, {
-      msgId: serverDbMsg.id,
-      n: serverDbMsg.n,
-      pn: serverDbMsg.pn,
-      dh: serverDbMsg.dh_pub?.slice(0, 8),
-      newHandshake: !!prekeyHeader,
+      msgId: baseMsgId,
+      devices: perDevice.length,
+      n: perDevice[0].serverDbMsg.n,
+      pn: perDevice[0].serverDbMsg.pn,
+      newHandshake: perDevice.some((p) => !!p.serverDbMsg.prekey),
     });
 
-    // Durable outbox row BEFORE any network call: an offline/transient send is
-    // now retried until delivered instead of being silently dropped.
+    // 3. Durable outbox row per device BEFORE any network call, so an
+    //    offline send is retried per device
     try {
-      await outboxRepo.enqueue({
-        msg_id: serverDbMsg.id,
-        conversation_id: activeConversationId,
-        sender_id: currentUserId,
-        recipient_id: recipientIdentity.uuid,
-        payload: JSON.stringify(serverDbMsg),
-      });
+      for (const { serverDbMsg, peerDeviceId } of perDevice) {
+        await outboxRepo.enqueue({
+          msg_id: serverDbMsg.id,
+          base_msg_id: baseMsgId,
+          conversation_id: activeConversationId,
+          sender_id: currentUserId,
+          recipient_id: recipientIdentity.uuid,
+          recipient_device_id: peerDeviceId,
+          payload: JSON.stringify(serverDbMsg),
+        });
+      }
     } catch (outboxErr) {
       console.error("Failed to enqueue message to outbox:", outboxErr);
       return null;
     }
 
-    // Local plaintext (kept local only) + optimistic UI, marked pending.
+    // 4. Local plaintext (kept local only) + optimistic UI, inserted ONCE under
+    //    the logical id (not per device).
     try {
       await messageRepo.insertMessage({
-        id: serverDbMsg.id,
+        id: baseMsgId,
         conversation_id: activeConversationId,
         sender_id: currentUser,
         recipient_id: recipientIdentity.uuid,
-        created_at_server: serverDbMsg.timestamp,
+        created_at_server: timestamp,
         timestamp: new Date().toISOString(),
         local_plaintext: text,
       });
@@ -196,22 +283,24 @@ export async function sendMessage(inputText: string) {
       console.error("Failed to insert sent message to local DB:", dbErr);
     }
 
-    const localDbMsg: EncryptedDbMessage = {
-      ...serverDbMsg,
+    const localDbMsg = {
+      id: baseMsgId,
+      conversation_id: activeConversationId,
+      sender: currentUser,
+      timestamp,
       text,
       isDecrypted: true,
       send_status: "pending",
-    } as any;
-
+    } as unknown as EncryptedDbMessage;
     addMessage(activeConversationId, localDbMsg);
 
     archiveInput = {
-      msg_id: serverDbMsg.id,
+      msg_id: baseMsgId,
       conversation_id: activeConversationId,
       sender_id: currentUser,
       recipient_id: recipientIdentity.uuid,
       text,
-      created_at_server: serverDbMsg.timestamp,
+      created_at_server: timestamp,
     };
     return true;
   });

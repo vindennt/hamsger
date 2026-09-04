@@ -8,13 +8,19 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from "../../lib/contacts";
-import { verifyUserKeysExist } from "../../lib/crypto";
+import { getDeviceId, verifyUserKeysExist } from "../../lib/crypto";
+import {
+  ArchiveSyncInsert,
+  drainArchive,
+  subscribeArchive,
+} from "../../lib/crypto/archiveSync";
 import { noteMessageForBackupRefresh } from "../../lib/crypto/backupAutoRefresh";
 import {
   archiveMessage,
   backfillArchive,
   ensureArchiveKey,
 } from "../../lib/crypto/messageArchive";
+import { refreshDevicePresence } from "../../lib/crypto/prekeyReplenish";
 import { TooManySkippedError } from "../../lib/crypto/ratchet";
 import { withRatchetLock } from "../../lib/crypto/ratchetLock";
 import {
@@ -39,7 +45,12 @@ import {
   makeSystemNote,
   sendSessionReset,
 } from "./sessionReset";
-import { EncryptedDbMessage, UserIdentity, makeConversationId } from "./types";
+import {
+  EncryptedDbMessage,
+  UserIdentity,
+  baseMessageId,
+  makeConversationId,
+} from "./types";
 import { useBackupAutoRefresh } from "./useBackupAutoRefresh";
 import { useOutbox } from "./useOutbox";
 import { MESSAGE_PAGE_SIZE, rowToUiMessage } from "./usePagination";
@@ -135,6 +146,16 @@ export function SessionManager() {
             console.error(
               "[SessionManager] Archive init/backfill failed:",
               archiveErr,
+            ),
+          );
+
+        // Update device's server visibility
+        getDeviceId(userId)
+          .then((deviceId) => refreshDevicePresence(userId, deviceId))
+          .catch((presenceErr) =>
+            console.error(
+              "[SessionManager] Device presence refresh failed:",
+              presenceErr,
             ),
           );
       } catch (err: any) {
@@ -385,10 +406,14 @@ export function SessionManager() {
 
     const fetchInitialMessages = async () => {
       try {
+        const myDeviceId = await getDeviceId(user.id);
         const { data, error } = await supabase
           .from("message_queue")
           .select("*")
           .eq("recipient_id", user.id)
+          .or(
+            `recipient_device_id.eq.${myDeviceId},recipient_device_id.is.null`,
+          )
           .order("created_at", { ascending: true });
 
         if (error) throw error;
@@ -396,6 +421,7 @@ export function SessionManager() {
         if (data && data.length > 0) {
           for (const row of data) {
             const payload = row.payload as EncryptedDbMessage;
+            payload.id = baseMessageId(payload.id);
             const convId = makeConversationId(user.id, row.sender_id);
             if (payload.type === SESSION_RESET_TYPE) {
               // Block unlimited rewinds in case of malicious actor
@@ -450,8 +476,17 @@ export function SessionManager() {
           const newRow = payload.new as any;
           if (newRow && newRow.payload) {
             if (newRow.recipient_id !== user.id) return;
+            // Skip (do NOT delete) rows for a sibling device — that device drains
+            // and deletes its own. Null-targeted (pre-fan-out) rows still process.
+            const myDeviceId = await getDeviceId(user.id);
+            if (
+              newRow.recipient_device_id &&
+              newRow.recipient_device_id !== myDeviceId
+            )
+              return;
 
             const newMsg = newRow.payload as EncryptedDbMessage;
+            newMsg.id = baseMessageId(newMsg.id);
             const convId = makeConversationId(user.id, newRow.sender_id);
             if (newMsg.type === SESSION_RESET_TYPE) {
               // Block unlimited rewinds in case of malicious actor
@@ -494,6 +529,41 @@ export function SessionManager() {
     // Keep user?.id and not user. Supabase token refresh means user is diff even if its same id, which re-triggers subscription  and can cause double decrypts
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isReady, decryptAndAddMessage]);
+
+  // Sync to outbound messages sent from user's other devices
+  useEffect(() => {
+    if (!user || !isReady) return;
+
+    const onInsert = (insert: ArchiveSyncInsert) => {
+      const msg = {
+        id: insert.msgId,
+        conversation_id: insert.convId,
+        sender: insert.sender,
+        timestamp: insert.created_at_server,
+        ciphertext: "",
+        iv: "",
+        auth_tag: "",
+        dh_pub: "",
+        pn: 0,
+        n: 0,
+        text: insert.text,
+        isDecrypted: true,
+      } as EncryptedDbMessage;
+      useChatStore.getState().addMessage(insert.convId, msg);
+    };
+
+    drainArchive(user.id, onInsert).catch((err) =>
+      console.error("[SessionManager] Archive drain failed:", err),
+    );
+
+    const channel = subscribeArchive(user.id, onInsert);
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // user?.id rather than user avoids a reload
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isReady]);
 
   return null; // Headless component
 }

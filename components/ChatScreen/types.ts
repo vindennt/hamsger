@@ -16,6 +16,14 @@ export function makeConversationId(
   return [uuid1, uuid2].sort().join(":");
 }
 
+// Multi device message creates transport Ids like
+// `${baseMsgId}__${recipientDeviceId}`
+// Strip device ID to avoid message archive treating it as 2 separte ones
+export function baseMessageId(id: string): string {
+  const i = id.indexOf("__");
+  return i === -1 ? id : id.slice(0, i);
+}
+
 // Delivery state for messages WE send (durable outbox, see lib/outbox).
 // Received messages leave this undefined.
 export type SendStatus = "pending" | "sent" | "failed";
@@ -51,6 +59,9 @@ export interface EncryptedDbMessage {
   // UI convenience — same as ciphertext until decryption is implemented
   text: string;
 
+  sender_device_id?: string;
+  recipient_device_id?: string;
+
   // Delivery state for sent messages (undefined for received messages).
   send_status?: SendStatus;
 
@@ -70,9 +81,10 @@ export interface EncryptedDbMessage {
 // The public keys the initiator sends in the first message of a conversation
 // opk: consumed onetime prekey's public key
 export interface PrekeyHeader {
-  ik: string;
+  ik: string; // SHARED account identity key (same across the sender's devices)
   ek: string;
   opk: string | null;
+  sender_device_id: string; // which of the sender's devices ran this handshake
 }
 
 /**

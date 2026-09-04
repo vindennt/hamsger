@@ -4,7 +4,7 @@ import { type SQLiteDatabase } from "expo-sqlite";
  * Current schema version. Bump this and add a new migration step
  * function (e.g. `migrateV1ToV2`) whenever the schema changes.
  */
-const LATEST_VERSION = 5;
+const LATEST_VERSION = 6;
 
 // ---------------------------------------------------------------------------
 // Migration steps — one function per version bump
@@ -201,6 +201,31 @@ async function migrateV4ToV5(db: SQLiteDatabase): Promise<void> {
 }
 
 /**
+ * v5 → v6: Per-device send fan-out on the outbox.
+ *
+ * Multi-device delivery sends one message_queue row per recipient device, so a
+ * logical message now maps to N outbox rows (one per peer device), each with a
+ * composite `msg_id` = `${baseMsgId}__${peerDeviceId}` so it retries
+ * independently. `recipient_device_id` targets the specific peer device (lifted
+ * onto the message_queue row at delivery); `base_msg_id` groups a message's
+ * device rows so send-status aggregates back to the single chat bubble. Existing
+ * rows keep NULL in both columns (they predate fan-out and are single-target).
+ */
+async function migrateV5ToV6(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync(`BEGIN TRANSACTION;`);
+  try {
+    await db.execAsync(
+      `ALTER TABLE outbox ADD COLUMN recipient_device_id TEXT;`,
+    );
+    await db.execAsync(`ALTER TABLE outbox ADD COLUMN base_msg_id TEXT;`);
+    await db.execAsync(`COMMIT;`);
+  } catch (e) {
+    await db.execAsync(`ROLLBACK;`);
+    throw e;
+  }
+}
+
+/**
  * Ordered list of migration functions.
  * Index 0 = v0→v1, index 1 = v1→v2, etc.
  */
@@ -210,6 +235,7 @@ const MIGRATIONS: readonly ((db: SQLiteDatabase) => Promise<void>)[] = [
   migrateV2ToV3,
   migrateV3ToV4,
   migrateV4ToV5,
+  migrateV5ToV6,
 ];
 
 // ---------------------------------------------------------------------------

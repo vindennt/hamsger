@@ -1,7 +1,11 @@
 import { ratchetDecrypt } from "../../lib/crypto/ratchet";
 import { saveEncryptedState } from "../../lib/crypto/secureStore";
 import { messageRepo } from "../../lib/database/messageRepository";
-import { loadRatchetState, serializeRatchetState } from "./ratchetHelpers";
+import {
+  loadRatchetState,
+  ratchetStateKey,
+  serializeRatchetState,
+} from "./ratchetHelpers";
 import { establishResponderSession } from "./sessionHelpers";
 import { ConversationId, EncryptedDbMessage } from "./types";
 
@@ -25,9 +29,13 @@ export async function decryptStoreInbound(
   // the ratchet is touched, so it can't decrypt against an advanced state and start desync recovery when uncessary
   if (await messageRepo.messageExists(msg.id)) return { status: "skipped" };
 
+  // Select per device ratchet
+  const peerDeviceId = msg.prekey?.sender_device_id ?? msg.sender_device_id;
+  if (!peerDeviceId) return { status: "no_state" };
+
   const state = msg.prekey
     ? await establishResponderSession(userId, msg.prekey)
-    : await loadRatchetState(convId, userId);
+    : await loadRatchetState(convId, userId, peerDeviceId);
   if (!state) return { status: "no_state" };
 
   const ratchetMsg = {
@@ -39,7 +47,7 @@ export async function decryptStoreInbound(
   const plaintext = await ratchetDecrypt(state, ratchetMsg, () => {});
 
   await saveEncryptedState(
-    `ratchetState_v3_${userId}_${convId}`,
+    ratchetStateKey(userId, convId, peerDeviceId),
     JSON.stringify(serializeRatchetState(state)),
   );
 

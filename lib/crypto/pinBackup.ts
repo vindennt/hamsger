@@ -6,7 +6,6 @@ import { BIP39_WORDLIST } from "./bip39Words";
 import { deriveWrappingKeyHex, type KdfId } from "./kdf";
 import {
   isSecretKvKey,
-  loadEncryptedState,
   readMaybeEncrypted,
   saveEncryptedState,
 } from "./secureStore";
@@ -86,12 +85,13 @@ export interface BackupPayload {
 
 // Key bundle export / import
 
-export async function exportKeyBundle(userId: string): Promise<string> {
-  const knownKeys = [
+// Multi-device: the backup carries ONLY the SHARED account secrets.
+// SPK, OPKs, and ratchet state are per device, DONT BACKUP
+
+function sharedAccountKeys(userId: string): string[] {
+  return [
     `ik_priv_${userId}`,
     `ik_pub_${userId}`,
-    `spk_priv_${userId}`,
-    `spk_pub_${userId}`,
     `sig_priv_${userId}`,
     `sig_pub_${userId}`,
     // Long-lived key that decrypts the incremental cloud archive. It MUST ride
@@ -99,57 +99,43 @@ export async function exportKeyBundle(userId: string): Promise<string> {
     // (docs/impl/p3-cloud-archive-hybrid.md).
     `archive_key_${userId}`,
   ];
+}
 
+function isSharedAccountKey(key: string): boolean {
+  return (
+    key.startsWith("ik_priv_") ||
+    key.startsWith("ik_pub_") ||
+    key.startsWith("sig_priv_") ||
+    key.startsWith("sig_pub_") ||
+    key.startsWith("archive_key_")
+  );
+}
+
+export async function exportKeyBundle(userId: string): Promise<string> {
   // Read tolerantly: secret keys (private + archive_key) are decrypted to plaintext so
   // they're portable to a new device; public keys pass straight through.
   const keyEntries: Record<string, string> = {};
-  for (const key of knownKeys) {
+  for (const key of sharedAccountKeys(userId)) {
     const val = await readMaybeEncrypted(key);
     if (val) keyEntries[key] = val;
   }
 
-  const opkRows = await kv.getAllByPrefix(`opk_priv_${userId}`);
-  for (const { key } of opkRows) {
-    const val = await readMaybeEncrypted(key);
-    if (val) keyEntries[key] = val;
-  }
-
-  // Ratchet states are stored device-encrypted; export plaintext so they're
-  // portable to new devices which will re-encrypt with their own master key.
-  const ratchetRows = await kv.getAllByPrefix(`ratchetState_v3_${userId}`);
-  const ratchetStates: Record<string, string> = {};
-  for (const { key } of ratchetRows) {
-    const plaintext = await loadEncryptedState(key);
-    if (plaintext) ratchetStates[key] = plaintext;
-  }
-
-  // Message history now lives in the incremental cloud archive (message_archive),
-  // NOT in this blob — so the blob stays small and bounded as history grows and
-  // #8 auto-refresh only re-uploads KB.
-  return JSON.stringify({ keyEntries, ratchetStates });
+  return JSON.stringify({ keyEntries });
 }
 
 export async function importKeyBundle(bundle: string): Promise<void> {
-  const { keyEntries, ratchetStates } = JSON.parse(bundle) as {
+  const { keyEntries } = JSON.parse(bundle) as {
     keyEntries: Record<string, string>;
-    ratchetStates: Record<string, string>;
   };
 
   // Re-encrypt secrets under THIS device's master key; public keys stay plaintext.
   for (const [key, value] of Object.entries(keyEntries)) {
+    if (!isSharedAccountKey(key)) continue;
     if (isSecretKvKey(key)) {
       await saveEncryptedState(key, value);
     } else {
       await kv.set(key, value);
     }
-  }
-
-  // Restore ratchet states only where none exist locally.
-  // Existing states are more recent than the backup and must not be overwritten,
-  // otherwise messages exchanged since the last backup become unreadable.
-  for (const [key, plaintext] of Object.entries(ratchetStates)) {
-    const existing = await loadEncryptedState(key);
-    if (!existing) await saveEncryptedState(key, plaintext);
   }
 
   // Message history is NOT in the blob: it's restored separately from the
